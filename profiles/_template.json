@@ -1,0 +1,14 @@
+{
+  "$comment": "Profile template - copy this file and rename to {your_name}.json",
+  "name": "Your Name",
+
+  "paths": {
+    "input_path": "/path/to/your/exam/pdfs",
+    "output_path": "/path/to/your/output",
+    "input_file_regex": ".*\\.pdf"
+  },
+
+  "settings": {
+    "inherit_from_env": true
+  }
+}
