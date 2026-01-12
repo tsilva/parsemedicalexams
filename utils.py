@@ -10,6 +10,17 @@ from typing import Any
 from PIL import Image, ImageEnhance
 import pandas as pd
 
+# Prompts directory
+PROMPTS_DIR = Path(__file__).parent / "prompts"
+
+
+def load_prompt(name: str) -> str:
+    """Load a prompt from the prompts directory."""
+    path = PROMPTS_DIR / f"{name}.md"
+    if not path.exists():
+        raise FileNotFoundError(f"Prompt file not found: {path}")
+    return path.read_text(encoding="utf-8").strip()
+
 
 def preprocess_page_image(image: Image.Image) -> Image.Image:
     """Convert image to grayscale, resize, and enhance contrast."""

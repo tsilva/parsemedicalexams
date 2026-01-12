@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from openai import OpenAI
 
-from utils import parse_llm_json_response
+from utils import load_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -31,51 +31,6 @@ def save_cache(name: str, cache: dict):
     path = CACHE_DIR / f"{name}.json"
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(cache, f, indent=2, ensure_ascii=False, sort_keys=True)
-
-
-SUMMARIZATION_SYSTEM_PROMPT = """
-You are a medical report summarizer. Your task is AGGRESSIVE filtering to extract ONLY the clinically relevant information.
-
-KEEP ONLY:
-1. FINDINGS - Actual observations from the exam (abnormalities, measurements, descriptions of pathological changes)
-2. IMPRESSIONS - Radiologist/specialist conclusions and diagnoses
-3. RECOMMENDATIONS - Follow-up actions, suggested additional tests, treatment suggestions
-
-REMOVE EVERYTHING ELSE:
-- Patient demographics (name, age, ID, date of birth)
-- Exam technique/protocol descriptions
-- Equipment used, contrast agents (unless clinically relevant)
-- Ordering physician information
-- Report headers/footers
-- Administrative text (referências, número de processo, etc.)
-- Boilerplate/template text
-- Normal findings that don't add clinical value (e.g., "liver appears normal", "no abnormalities detected")
-- Facility information
-- Report generation dates
-
-OUTPUT FORMAT:
-Return a concise paragraph or bullet points with ONLY the clinically significant findings, impressions, and recommendations.
-
-SPECIAL CASES:
-- If the exam is COMPLETELY NORMAL with no significant findings, return: "No significant findings."
-- If the exam has minor normal variants but nothing pathological, return: "No significant findings. [Note any relevant normal variants]"
-
-LANGUAGE: Preserve the original language of the findings (Portuguese/English). Do NOT translate.
-
-IMPORTANT: Be aggressive in filtering. When in doubt, leave it out. The goal is a clean, concise clinical summary.
-""".strip()
-
-SUMMARIZATION_USER_PROMPT = """
-Aggressively summarize this medical exam transcription. Keep ONLY findings, impressions, and recommendations. Remove all administrative text, normal/unremarkable findings, and boilerplate.
-
-EXAM TYPE: {exam_type}
-EXAM NAME: {exam_name}
-
-TRANSCRIPTION:
-{transcription}
-
-SUMMARY:
-""".strip()
 
 
 def summarize_exam(
@@ -111,17 +66,22 @@ def summarize_exam(
         logger.debug(f"Using cached summary for hash {cache_key[:8]}...")
         return cache[cache_key]
 
+    # Load prompts
+    system_prompt = load_prompt("summarization_system")
+    user_prompt_template = load_prompt("summarization_user")
+    user_prompt = user_prompt_template.format(
+        exam_type=exam_type,
+        exam_name=exam_name,
+        transcription=transcription
+    )
+
     # LLM call
     try:
         completion = client.chat.completions.create(
             model=model_id,
             messages=[
-                {"role": "system", "content": SUMMARIZATION_SYSTEM_PROMPT},
-                {"role": "user", "content": SUMMARIZATION_USER_PROMPT.format(
-                    exam_type=exam_type,
-                    exam_name=exam_name,
-                    transcription=transcription
-                )}
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
             ],
             temperature=0.1,
             max_tokens=2000

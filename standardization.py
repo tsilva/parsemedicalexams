@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from openai import OpenAI
 
-from utils import parse_llm_json_response
+from utils import parse_llm_json_response, load_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -67,35 +67,11 @@ def standardize_exam_types(
     if uncached_names:
         logger.info(f"[exam_type_standardization] {len(uncached_names)} uncached names, calling LLM...")
 
-        system_prompt = """You are a medical exam classification expert.
-
-Your task: Classify raw exam names from medical reports into standardized categories and names.
-
-EXAM TYPE GUIDELINES:
-- imaging: X-ray, MRI, CT, Mammography, DEXA, PET scans, angiography
-- ultrasound: Ultrasound, Echocardiogram, Doppler studies
-- endoscopy: Any scope procedure (gastroscopy, colonoscopy, bronchoscopy, cystoscopy, etc.)
-- other: ECG, EEG, Spirometry, Sleep studies, Holter, stress tests, biopsies, pathology
-
-RULES:
-1. Classify each raw exam name into an appropriate exam_type category
-2. Provide a clean, standardized English name for the exam
-3. Handle Portuguese and English terminology
-4. Return JSON: {"raw_name": {"exam_type": "...", "standardized_name": "..."}}
-
-EXAMPLES:
-- "Radiografia do Tórax" → {"exam_type": "imaging", "standardized_name": "Chest X-ray"}
-- "Ecografia Abdominal" → {"exam_type": "ultrasound", "standardized_name": "Abdominal Ultrasound"}
-- "EDA" → {"exam_type": "endoscopy", "standardized_name": "Upper GI Endoscopy"}
-- "Eletrocardiograma" → {"exam_type": "other", "standardized_name": "ECG"}
-- "RM Cerebral" → {"exam_type": "imaging", "standardized_name": "Brain MRI"}
-"""
-
-        user_prompt = f"""Classify these exam names:
-
-{json.dumps(uncached_names, ensure_ascii=False, indent=2)}
-
-Return a JSON object mapping each raw name to its classification."""
+        system_prompt = load_prompt("standardization_system")
+        user_prompt_template = load_prompt("standardization_user")
+        user_prompt = user_prompt_template.format(
+            exam_names=json.dumps(uncached_names, ensure_ascii=False, indent=2)
+        )
 
         try:
             completion = client.chat.completions.create(

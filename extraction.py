@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pydantic import BaseModel, Field
 from openai import OpenAI, APIError
 
-from utils import parse_llm_json_response
+from utils import parse_llm_json_response, load_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -104,64 +104,6 @@ TOOLS = [
 ]
 
 
-# ========================================
-# Extraction Prompts
-# ========================================
-
-EXTRACTION_SYSTEM_PROMPT = """
-You are a medical exam report transcription specialist. Your PRIMARY goal is to extract the COMPLETE text content from medical imaging, ultrasound, endoscopy, and other diagnostic exam reports.
-
-CRITICAL RULES:
-
-1. TRANSCRIBE COMPLETELY: Extract the FULL text of the exam report exactly as written
-   - Copy ALL visible text including headers, findings, impressions, and conclusions
-   - Preserve paragraph structure and formatting where possible
-   - Do NOT summarize or condense - we need the complete transcription
-
-2. EXAM IDENTIFICATION:
-   - Identify the exam type from the document (X-ray, MRI, CT, Ultrasound, Echo, Endoscopy, etc.)
-   - Extract the exam name exactly as written in the document
-
-3. DATE EXTRACTION:
-   - Look for exam date, report date, or study date
-   - Convert to YYYY-MM-DD format
-   - If only one date visible, use it as exam_date
-
-4. MULTIPLE EXAMS:
-   - If a document contains MULTIPLE different exams, extract each as a separate entry
-   - Each exam should have its own complete transcription
-
-5. LANGUAGE PRESERVATION:
-   - Keep text in the original language (Portuguese, English, etc.)
-   - Do NOT translate medical terminology
-
-EXAM TYPES TO RECOGNIZE:
-- Imaging: X-ray (Radiografia), MRI (Ressonância Magnética), CT (Tomografia), Mammography (Mamografia)
-- Ultrasound: Abdominal, Pelvic, Thyroid, Echocardiogram (Ecocardiograma)
-- Endoscopy: Gastroscopy (EDA), Colonoscopy (Colonoscopia), Bronchoscopy
-- Other: ECG, EEG, Spirometry, Stress Test, Sleep Study, Pathology
-
-PAGE CLASSIFICATION:
-- `page_has_exam_data`: Set to true if this page contains ANY exam report content
-- Set to false if this is a cover page, instructions, administrative content, or has no exam data
-- This helps distinguish empty pages from extraction failures
-
-Remember: Your job is to transcribe COMPLETELY. Extract EVERYTHING visible in the report.
-""".strip()
-
-EXTRACTION_USER_PROMPT = """
-Please extract ALL medical exam reports from this document image.
-
-For EACH exam found, provide:
-1. exam_date - The date of the exam/study (YYYY-MM-DD format)
-2. exam_name_raw - The exam name exactly as written
-3. transcription - The COMPLETE text of the exam report (include everything visible)
-
-IMPORTANT:
-- Transcribe the FULL content, do not summarize
-- If multiple exams are in the document, extract each separately
-- Set page_has_exam_data to false if this is just a cover page or administrative content
-""".strip()
 
 
 # ========================================
@@ -230,15 +172,7 @@ def vote_on_best_result(results: list, model_id: str, fn_name: str):
         api_key=os.getenv("OPENROUTER_API_KEY")
     )
 
-    system_prompt = (
-        "You are an expert at comparing multiple outputs of the same extraction task. "
-        "We have extracted several samples from the same prompt in order to average out any errors or inconsistencies. "
-        "Your job is to select the output that is most consistent with the majority of the provided samples. "
-        "Prioritize agreement on extracted content (exam names, dates, transcription text, etc.). "
-        "Ignore formatting, whitespace, and layout differences. "
-        "Return ONLY the best output, verbatim, with no extra commentary. "
-        "Do NOT include any delimiters, output numbers, or extra labels in your response."
-    )
+    system_prompt = load_prompt("voting_system")
 
     prompt = "".join(
         f"--- Output {i+1} ---\n{json.dumps(v, ensure_ascii=False) if type(v) in [list, dict] else v}\n\n"
@@ -296,13 +230,16 @@ def extract_exams_from_page_image(
     with open(image_path, "rb") as img_file:
         img_data = base64.standard_b64encode(img_file.read()).decode("utf-8")
 
+    system_prompt = load_prompt("extraction_system")
+    user_prompt = load_prompt("extraction_user")
+
     try:
         completion = client.chat.completions.create(
             model=model_id,
             messages=[
-                {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": [
-                    {"type": "text", "text": EXTRACTION_USER_PROMPT},
+                    {"type": "text", "text": user_prompt},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_data}"}}
                 ]}
             ],

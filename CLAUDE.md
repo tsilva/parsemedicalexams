@@ -43,6 +43,7 @@ python main.py --list-profiles
 - `.env`: API keys, model IDs, default input/output paths
 - `profiles/*.json`: User-specific path overrides (inherit from .env with `inherit_from_env: true`)
 - `config/cache/*.json`: LLM response caches (user-editable for overrides)
+- `prompts/*.md`: All LLM prompts externalized as markdown files
 
 ### Output Format
 CSV columns: `date`, `exam_type`, `exam_name_raw`, `exam_name_standardized`, `transcription`, `summary`, `source_file`, `page_number`
