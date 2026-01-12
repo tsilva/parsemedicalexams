@@ -3,11 +3,11 @@
 import argparse
 import json
 import re
+import sys
 import logging
+from collections import defaultdict
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import pandas as pd
 from pdf2image import convert_from_path
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -21,24 +21,65 @@ from utils import preprocess_page_image, setup_logging
 
 logger = logging.getLogger(__name__)
 
-# Column schema for output CSV
-COLUMN_SCHEMA = {
-    "date": {"dtype": "datetime64[ns]", "excel_width": 13},
-    "exam_type": {"dtype": "str", "excel_width": 12},
-    "exam_name_raw": {"dtype": "str", "excel_width": 30},
-    "exam_name_standardized": {"dtype": "str", "excel_width": 30},
-    "transcription": {"dtype": "str", "excel_width": 80},
-    "summary": {"dtype": "str", "excel_width": 60},
-    "source_file": {"dtype": "str", "excel_width": 25},
-    "page_number": {"dtype": "Int64", "excel_width": 8},
-}
 
-
-def get_csv_path(pdf_path: Path, output_path: Path) -> Path:
-    """Get CSV output path for a PDF file."""
+def is_document_processed(pdf_path: Path, output_path: Path) -> bool:
+    """Check if a PDF has already been processed by looking for JSON extraction files."""
     doc_stem = pdf_path.stem
     doc_output_dir = output_path / doc_stem
-    return doc_output_dir / f"{doc_stem}.csv"
+    # A document is considered processed if its output directory exists and has JSON files
+    if not doc_output_dir.exists():
+        return False
+    json_files = list(doc_output_dir.glob(f"{doc_stem}.*.json"))
+    return len(json_files) > 0
+
+
+def save_transcription_files(
+    exams: list[dict],
+    doc_output_dir: Path,
+    doc_stem: str,
+    page_num: int
+) -> None:
+    """
+    Save transcription and summary as separate files.
+    - .md = raw transcription verbatim
+    - .summary.md = summary only
+    """
+    # Transcription file - raw text only
+    md_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.md"
+    transcriptions = [exam.get("transcription", "") for exam in exams]
+    with open(md_path, 'w', encoding='utf-8') as f:
+        f.write("\n\n".join(transcriptions).strip() + "\n")
+
+    # Summary file - summaries only
+    summaries = [exam.get("summary", "") for exam in exams if exam.get("summary")]
+    if summaries:
+        summary_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.summary.md"
+        with open(summary_path, 'w', encoding='utf-8') as f:
+            f.write("\n\n".join(summaries).strip() + "\n")
+
+
+def save_metadata_json(
+    exams: list[dict],
+    doc_output_dir: Path,
+    doc_stem: str,
+    page_num: int
+) -> Path:
+    """
+    Save exam metadata as JSON (no transcription - that goes in .md file).
+    """
+    json_filename = f"{doc_stem}.{page_num:03d}.json"
+    json_path = doc_output_dir / json_filename
+
+    # Strip transcription from metadata
+    metadata_exams = []
+    for exam in exams:
+        meta = {k: v for k, v in exam.items() if k != "transcription"}
+        metadata_exams.append(meta)
+
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump({"exams": metadata_exams}, f, ensure_ascii=False, indent=2)
+
+    return json_path
 
 
 def extract_date_from_filename(filename: str) -> str | None:
@@ -160,80 +201,139 @@ def process_single_pdf(
     # Generate summaries
     all_exams = batch_summarize_exams(all_exams, config.summarize_model_id, client)
 
-    # Convert to DataFrame
-    df = pd.DataFrame(all_exams)
+    # Group exams by page and save one markdown file per page
+    exams_by_page = defaultdict(list)
+    for exam in all_exams:
+        page_num = exam.get("page_number", 1)
+        exams_by_page[page_num].append(exam)
 
-    # Rename date column
-    if "exam_date" in df.columns:
-        df = df.rename(columns={"exam_date": "date"})
+    md_paths = []
+    for page_num, page_exams in sorted(exams_by_page.items()):
+        save_transcription_files(page_exams, doc_output_dir, doc_stem, page_num)
+        save_metadata_json(page_exams, doc_output_dir, doc_stem, page_num)
+        md_paths.append(page_num)
 
-    # Ensure all required columns exist
-    for col in COLUMN_SCHEMA.keys():
-        if col not in df.columns:
-            df[col] = None
+    logger.info(f"Saved {len(md_paths)} pages ({len(all_exams)} exams) for: {pdf_path.name}")
 
-    # Reorder columns
-    df = df[[col for col in COLUMN_SCHEMA.keys() if col in df.columns]]
-
-    # Save per-document CSV
-    csv_path = doc_output_dir / f"{doc_stem}.csv"
-    df.to_csv(csv_path, index=False)
-    logger.info(f"Saved: {csv_path} ({len(df)} exams)")
-
-    return csv_path
+    return len(all_exams)
 
 
-def merge_csv_files(csv_paths: list[Path], output_path: Path) -> pd.DataFrame:
-    """Merge all per-document CSVs into a single DataFrame."""
-    dfs = []
-    for csv_path in csv_paths:
-        if csv_path and csv_path.exists():
-            df = pd.read_csv(csv_path)
-            dfs.append(df)
+def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: OpenAI):
+    """
+    Regenerate summary files from existing transcription (.md) and metadata (.json) files.
 
-    if not dfs:
-        logger.warning("No CSV files to merge")
-        return pd.DataFrame(columns=COLUMN_SCHEMA.keys())
+    Reads transcription from .md files and metadata from .json files,
+    re-runs summarization, and saves updated .summary.md files.
+    """
+    # Find all document directories
+    doc_dirs = [d for d in output_path.iterdir() if d.is_dir() and d.name != "logs"]
 
-    merged = pd.concat(dfs, ignore_index=True)
+    logger.info(f"Found {len(doc_dirs)} document directories to regenerate")
 
-    # Sort by date (newest first)
-    if "date" in merged.columns:
-        merged["date"] = pd.to_datetime(merged["date"], errors="coerce")
-        merged = merged.sort_values("date", ascending=False)
+    total_exams = 0
+    for doc_dir in tqdm(doc_dirs, desc="Regenerating summaries"):
+        doc_stem = doc_dir.name
 
-    return merged
+        # Find all JSON metadata files (exclude .summary.md pattern)
+        json_files = sorted([f for f in doc_dir.glob(f"{doc_stem}.*.json")])
+        if not json_files:
+            logger.warning(f"No JSON files found in {doc_dir}")
+            continue
 
+        all_exams = []
 
-def export_excel(df: pd.DataFrame, output_path: Path):
-    """Export DataFrame to Excel with formatting."""
-    with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
-        df.to_excel(writer, sheet_name='AllData', index=False)
+        for json_path in json_files:
+            # Extract page number from filename
+            parts = json_path.stem.split(".")
+            if len(parts) >= 2:
+                try:
+                    page_num = int(parts[-1])
+                except ValueError:
+                    continue
+            else:
+                continue
 
-        workbook = writer.book
-        worksheet = writer.sheets['AllData']
+            # Read metadata from JSON
+            with open(json_path, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
 
-        # Set column widths
-        for i, col in enumerate(df.columns):
-            if col in COLUMN_SCHEMA:
-                width = COLUMN_SCHEMA[col].get("excel_width", 15)
-                worksheet.set_column(i, i, width)
+            # Read transcription from corresponding .md file
+            md_path = doc_dir / f"{doc_stem}.{page_num:03d}.md"
+            if not md_path.exists():
+                logger.warning(f"No transcription file found: {md_path}")
+                continue
+
+            with open(md_path, 'r', encoding='utf-8') as f:
+                transcription = f.read().strip()
+
+            # Combine metadata with transcription
+            for exam in metadata.get("exams", []):
+                exam["transcription"] = transcription
+                exam["page_number"] = page_num
+                all_exams.append(exam)
+
+        if not all_exams:
+            logger.warning(f"No exams found in {doc_dir}")
+            continue
+
+        # Re-run summarization with updated prompts
+        all_exams = batch_summarize_exams(all_exams, config.summarize_model_id, client)
+
+        # Delete existing .summary.md files only
+        for old_summary in doc_dir.glob("*.summary.md"):
+            old_summary.unlink()
+
+        # Group exams by page and save updated summary files and metadata
+        exams_by_page = defaultdict(list)
+        for exam in all_exams:
+            page_num = exam.get("page_number", 1)
+            exams_by_page[page_num].append(exam)
+
+        pages_saved = 0
+        for page_num, page_exams in sorted(exams_by_page.items()):
+            # Save only summary file (transcription .md unchanged)
+            summaries = [exam.get("summary", "") for exam in page_exams if exam.get("summary")]
+            if summaries:
+                summary_path = doc_dir / f"{doc_stem}.{page_num:03d}.summary.md"
+                with open(summary_path, 'w', encoding='utf-8') as f:
+                    f.write("\n\n".join(summaries).strip() + "\n")
+
+            # Update metadata JSON with new summary
+            save_metadata_json(page_exams, doc_dir, doc_stem, page_num)
+            pages_saved += 1
+
+        logger.info(f"Regenerated summaries for {pages_saved} pages ({len(all_exams)} exams): {doc_stem}")
+        total_exams += len(all_exams)
+
+    return total_exams
 
 
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Extract and summarize medical exam reports from PDFs"
+        description="Extract and summarize medical exam reports from PDFs",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python main.py --profile tsilva    # Run with a specific profile (required)
+  python main.py --list-profiles     # List available profiles
+  python main.py --profile tsilva --regenerate  # Regenerate summaries from existing .md files
+        """
     )
     parser.add_argument(
-        "--profile",
+        "--profile", "-p",
         type=str,
-        help="Profile name to use (from profiles/ directory)"
+        help="Profile name (without .json extension)"
     )
     parser.add_argument(
         "--list-profiles",
         action="store_true",
         help="List available profiles and exit"
+    )
+    parser.add_argument(
+        "--regenerate",
+        action="store_true",
+        help="Regenerate summaries from existing transcription files"
     )
     return parser.parse_args()
 
@@ -254,27 +354,45 @@ def main():
             print("No profiles found in profiles/ directory")
         return
 
+    # Profile is required
+    if not args.profile:
+        print("Error: --profile is required.")
+        print("Use --list-profiles to see available profiles.")
+        sys.exit(1)
+
     # Load configuration
     config = ExtractionConfig.from_env()
 
-    # Apply profile overrides if specified
-    profile = None
-    if args.profile:
-        profile_path = Path("profiles") / f"{args.profile}.json"
-        if not profile_path.exists():
-            print(f"Profile not found: {profile_path}")
-            print(f"Available profiles: {ProfileConfig.list_profiles()}")
-            return
-        profile = ProfileConfig.from_file(profile_path, config)
+    # Apply profile overrides
+    profile_path = Path("profiles") / f"{args.profile}.json"
+    if not profile_path.exists():
+        print(f"Profile not found: {profile_path}")
+        print(f"Available profiles: {ProfileConfig.list_profiles()}")
+        sys.exit(1)
+    profile = ProfileConfig.from_file(profile_path, config)
 
-        # Override config with profile paths
-        if profile.input_path:
-            config.input_path = profile.input_path
-        if profile.output_path:
-            config.output_path = profile.output_path
-            config.output_path.mkdir(parents=True, exist_ok=True)
-        if profile.input_file_regex:
-            config.input_file_regex = profile.input_file_regex
+    # Override config with profile paths
+    if profile.input_path:
+        config.input_path = profile.input_path
+    if profile.output_path:
+        config.output_path = profile.output_path
+        config.output_path.mkdir(parents=True, exist_ok=True)
+    if profile.input_file_regex:
+        config.input_file_regex = profile.input_file_regex
+
+    # Validate required paths after profile overrides
+    if not config.input_path:
+        print("Error: INPUT_PATH not set in .env or profile.")
+        sys.exit(1)
+    if not config.input_path.exists():
+        print(f"Error: INPUT_PATH does not exist: {config.input_path}")
+        sys.exit(1)
+    if not config.output_path:
+        print("Error: OUTPUT_PATH not set in .env or profile.")
+        sys.exit(1)
+    if not config.input_file_regex:
+        print("Error: INPUT_FILE_REGEX not set in .env or profile.")
+        sys.exit(1)
 
     # Setup logging
     log_dir = config.output_path / "logs"
@@ -297,6 +415,16 @@ def main():
         api_key=config.openrouter_api_key
     )
 
+    # Handle --regenerate mode
+    if args.regenerate:
+        logger.info("Regeneration mode: re-summarizing from existing transcription files")
+        total_exams = regenerate_summaries(config.output_path, config, client)
+        logger.info("=" * 60)
+        logger.info("Regeneration Complete")
+        logger.info("=" * 60)
+        logger.info(f"Regenerated summaries for {total_exams} exams")
+        return
+
     # Find PDF files
     pdf_pattern = re.compile(config.input_file_regex)
     pdf_files = sorted([
@@ -310,52 +438,33 @@ def main():
         logger.warning("No PDF files found. Check INPUT_PATH and INPUT_FILE_REGEX.")
         return
 
-    # Process PDFs
-    csv_paths = []
-
     # Check for already processed files
     to_process = []
+    already_processed = 0
     for pdf_path in pdf_files:
-        csv_path = get_csv_path(pdf_path, config.output_path)
-        if csv_path.exists():
+        if is_document_processed(pdf_path, config.output_path):
             logger.info(f"Skipping (already processed): {pdf_path.name}")
-            csv_paths.append(csv_path)
+            already_processed += 1
         else:
             to_process.append(pdf_path)
 
-    logger.info(f"Processing {len(to_process)} new PDFs, {len(csv_paths)} already processed")
+    logger.info(f"Processing {len(to_process)} new PDFs, {already_processed} already processed")
 
     # Process PDFs (sequential for now to avoid rate limits)
+    total_exams = 0
     for pdf_path in tqdm(to_process, desc="Processing PDFs"):
         try:
-            result = process_single_pdf(pdf_path, config.output_path, config, client)
-            if result:
-                csv_paths.append(result)
+            exam_count = process_single_pdf(pdf_path, config.output_path, config, client)
+            if exam_count:
+                total_exams += exam_count
         except Exception as e:
             logger.error(f"Failed to process {pdf_path.name}: {e}")
-
-    # Merge all CSVs
-    logger.info("Merging all CSVs...")
-    merged_df = merge_csv_files(csv_paths, config.output_path)
-
-    # Save merged outputs
-    all_csv_path = config.output_path / "all.csv"
-    merged_df.to_csv(all_csv_path, index=False)
-    logger.info(f"Saved: {all_csv_path} ({len(merged_df)} total exams)")
-
-    all_xlsx_path = config.output_path / "all.xlsx"
-    export_excel(merged_df, all_xlsx_path)
-    logger.info(f"Saved: {all_xlsx_path}")
 
     # Summary
     logger.info("=" * 60)
     logger.info("Pipeline Complete")
     logger.info("=" * 60)
-    logger.info(f"Total exams extracted: {len(merged_df)}")
-    if "exam_type" in merged_df.columns:
-        type_counts = merged_df["exam_type"].value_counts()
-        for exam_type, count in type_counts.items():
-            logger.info(f"  - {exam_type}: {count}")
+    logger.info(f"Processed {len(to_process)} PDFs, extracted {total_exams} exams")
 
 
 if __name__ == "__main__":

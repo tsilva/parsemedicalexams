@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Medical Exams Parser extracts and summarizes medical exam reports (X-rays, MRIs, ultrasounds, endoscopies, etc.) from PDF documents using Vision LLMs via OpenRouter. It outputs structured CSV data compatible with health-logs-parser integration.
+Medical Exams Parser extracts and summarizes medical exam reports (X-rays, MRIs, ultrasounds, endoscopies, etc.) from PDF documents using Vision LLMs via OpenRouter. It outputs individual markdown files per exam with YAML frontmatter for metadata.
 
 ## Commands
 
@@ -20,6 +20,9 @@ python main.py --profile tsilva
 
 # List available profiles
 python main.py --list-profiles
+
+# Regenerate .md files from existing JSON extraction data
+python main.py --profile tsilva --regenerate
 ```
 
 ## Architecture
@@ -29,7 +32,7 @@ python main.py --list-profiles
 2. **Vision LLM Extraction**: Extract exam data using function calling with self-consistency voting (N extractions, LLM votes on best)
 3. **Standardization**: Classify exam types (imaging/ultrasound/endoscopy/other) and standardize names via LLM with JSON cache
 4. **Summarization**: Aggressive filtering to keep only findings, impressions, and recommendations
-5. **Output**: Per-document CSVs merged into `all.csv` and `all.xlsx`
+5. **Output**: Individual markdown files per exam with YAML frontmatter
 
 ### Key Modules
 - **main.py**: Pipeline orchestration, PDF processing loop, CLI argument handling
@@ -46,9 +49,10 @@ python main.py --list-profiles
 - `prompts/*.md`: All LLM prompts externalized as markdown files
 
 ### Output Format
-CSV columns: `date`, `exam_type`, `exam_name_raw`, `exam_name_standardized`, `transcription`, `summary`, `source_file`, `page_number`
-
-The `all.csv` output is compatible with health-logs-parser's `LABS_PARSER_OUTPUT_PATH` integration.
+Each page produces three files:
+- **`{doc_stem}.{page}.md`**: Raw transcription verbatim
+- **`{doc_stem}.{page}.summary.md`**: Summary only
+- **`{doc_stem}.{page}.json`**: Metadata only (no transcription)
 
 ## Patterns from labs-parser
 

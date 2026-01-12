@@ -331,15 +331,34 @@ def _normalize_date_format(date_str: Optional[str]) -> Optional[str]:
 
 
 def _fix_date_formats(tool_result_dict: dict) -> dict:
-    """Fix common date formatting issues."""
+    """Fix common date formatting issues and handle malformed exam entries."""
     # Fix date at report level
     if "report_date" in tool_result_dict:
         tool_result_dict["report_date"] = _normalize_date_format(tool_result_dict["report_date"])
 
-    # Fix dates in exams
+    # Fix dates in exams, also handle string exams (Gemini sometimes returns JSON strings instead of objects)
     if "exams" in tool_result_dict and isinstance(tool_result_dict["exams"], list):
+        fixed_exams = []
         for exam in tool_result_dict["exams"]:
+            # Skip None values
+            if exam is None:
+                continue
+
+            # Parse string exams as JSON (Gemini bug: returns JSON strings instead of objects)
+            if isinstance(exam, str):
+                try:
+                    exam = json.loads(exam)
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse exam string as JSON: {exam[:100]}...")
+                    continue
+
+            # Fix date format
             if isinstance(exam, dict) and "exam_date" in exam:
                 exam["exam_date"] = _normalize_date_format(exam["exam_date"])
+
+            if isinstance(exam, dict):
+                fixed_exams.append(exam)
+
+        tool_result_dict["exams"] = fixed_exams
 
     return tool_result_dict

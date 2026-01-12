@@ -68,9 +68,9 @@ class ProfileConfig:
 @dataclass
 class ExtractionConfig:
     """Configuration for extraction pipeline."""
-    input_path: Path
-    input_file_regex: str
-    output_path: Path
+    input_path: Optional[Path]
+    input_file_regex: Optional[str]
+    output_path: Optional[Path]
     self_consistency_model_id: str
     extract_model_id: str
     summarize_model_id: str
@@ -80,10 +80,14 @@ class ExtractionConfig:
 
     @classmethod
     def from_env(cls) -> 'ExtractionConfig':
-        """Load configuration from environment variables."""
-        input_path = os.getenv("INPUT_PATH")
+        """Load configuration from environment variables.
+
+        Note: input_path, output_path, and input_file_regex can be None here
+        if they will be provided by a profile.
+        """
+        input_path_str = os.getenv("INPUT_PATH")
         input_file_regex = os.getenv("INPUT_FILE_REGEX")
-        output_path = os.getenv("OUTPUT_PATH")
+        output_path_str = os.getenv("OUTPUT_PATH")
         self_consistency_model_id = os.getenv("SELF_CONSISTENCY_MODEL_ID")
         extract_model_id = os.getenv("EXTRACT_MODEL_ID")
         summarize_model_id = os.getenv("SUMMARIZE_MODEL_ID")
@@ -91,19 +95,13 @@ class ExtractionConfig:
         openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
         max_workers_str = os.getenv("MAX_WORKERS", "1")
 
-        # Validate required fields
+        # Validate required fields (paths can be provided by profile)
         if not self_consistency_model_id:
             raise ValueError("SELF_CONSISTENCY_MODEL_ID not set")
         if not extract_model_id:
             raise ValueError("EXTRACT_MODEL_ID not set")
         if not summarize_model_id:
             raise ValueError("SUMMARIZE_MODEL_ID not set")
-        if not input_path or not Path(input_path).exists():
-            raise ValueError(f"INPUT_PATH ('{input_path}') not set or does not exist.")
-        if not input_file_regex:
-            raise ValueError("INPUT_FILE_REGEX not set")
-        if not output_path:
-            raise ValueError("OUTPUT_PATH not set")
         if not openrouter_api_key:
             raise ValueError("OPENROUTER_API_KEY not set")
 
@@ -114,13 +112,14 @@ class ExtractionConfig:
             logger.warning(f"MAX_WORKERS ('{max_workers_str}') is not valid. Defaulting to 1.")
             max_workers = 1
 
-        output_path_obj = Path(output_path)
-        output_path_obj.mkdir(parents=True, exist_ok=True)
+        # Parse paths (can be None if profile provides them)
+        input_path = Path(input_path_str) if input_path_str else None
+        output_path = Path(output_path_str) if output_path_str else None
 
         return cls(
-            input_path=Path(input_path),
+            input_path=input_path,
             input_file_regex=input_file_regex,
-            output_path=output_path_obj,
+            output_path=output_path,
             self_consistency_model_id=self_consistency_model_id,
             extract_model_id=extract_model_id,
             summarize_model_id=summarize_model_id,
