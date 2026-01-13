@@ -1,6 +1,8 @@
-Extract the clinical content from this medical report. Copy the findings, impressions, and recommendations VERBATIM. Remove only administrative text (names, addresses, headers, footers).
+Translate and reformat this medical report to English with markdown formatting.
 
-Do NOT summarize. Do NOT say "No significant findings". Copy the actual clinical text exactly as written.
+IMPORTANT: Only translate what is written - do NOT add your own conclusions or interpretations. You are a translator, not a doctor.
+
+Use ## for the exam name header, **bold** for conclusion/impression labels (only if present in original). Remove administrative text (names, addresses, headers, footers).
 
 EXAM TYPE: {exam_type}
 EXAM NAME: {exam_name}
@@ -8,4 +10,4 @@ EXAM NAME: {exam_name}
 TRANSCRIPTION:
 {transcription}
 
-CLINICAL CONTENT (verbatim):
+TRANSLATION (markdown formatted, in English, no added conclusions):

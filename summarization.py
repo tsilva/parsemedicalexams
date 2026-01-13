@@ -1,36 +1,11 @@
 """Aggressive summarization of medical exam transcriptions."""
 
-import hashlib
-import json
 import logging
-from pathlib import Path
 from openai import OpenAI
 
 from utils import load_prompt
 
 logger = logging.getLogger(__name__)
-
-# Cache directory for summarization results
-CACHE_DIR = Path("config/cache")
-
-
-def load_cache(name: str) -> dict:
-    """Load JSON cache file."""
-    path = CACHE_DIR / f"{name}.json"
-    if path.exists():
-        try:
-            return json.load(open(path, encoding='utf-8'))
-        except (json.JSONDecodeError, IOError) as e:
-            logger.warning(f"Failed to load cache {name}: {e}")
-    return {}
-
-
-def save_cache(name: str, cache: dict):
-    """Save cache to JSON."""
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    path = CACHE_DIR / f"{name}.json"
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(cache, f, indent=2, ensure_ascii=False, sort_keys=True)
 
 
 def summarize_exam(
@@ -42,8 +17,6 @@ def summarize_exam(
 ) -> str:
     """
     Generate aggressive summary keeping only findings, impressions, recommendations.
-
-    Uses caching based on hash of transcription to avoid re-summarizing identical text.
 
     Args:
         transcription: Full text transcription of the exam
@@ -57,14 +30,6 @@ def summarize_exam(
     """
     if not transcription or not transcription.strip():
         return ""
-
-    # Load cache (keyed by hash of transcription)
-    cache = load_cache("summarization")
-    cache_key = hashlib.md5(transcription.encode()).hexdigest()
-
-    if cache_key in cache:
-        logger.debug(f"Using cached summary for hash {cache_key[:8]}...")
-        return cache[cache_key]
 
     # Load prompts
     system_prompt = load_prompt("summarization_system")
@@ -91,13 +56,7 @@ def summarize_exam(
             logger.error("Invalid completion response for summarization")
             return ""
 
-        summary = completion.choices[0].message.content.strip()
-
-        # Cache result
-        cache[cache_key] = summary
-        save_cache("summarization", cache)
-
-        return summary
+        return completion.choices[0].message.content.strip()
 
     except Exception as e:
         logger.error(f"Error during summarization: {e}")

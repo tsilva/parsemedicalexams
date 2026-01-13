@@ -50,12 +50,12 @@ def save_transcription_files(
     with open(md_path, 'w', encoding='utf-8') as f:
         f.write("\n\n".join(transcriptions).strip() + "\n")
 
-    # Summary file - summaries only
+    # Summary file - summaries only (with separators between multiple exams)
     summaries = [exam.get("summary", "") for exam in exams if exam.get("summary")]
     if summaries:
         summary_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.summary.md"
         with open(summary_path, 'w', encoding='utf-8') as f:
-            f.write("\n\n".join(summaries).strip() + "\n")
+            f.write("\n\n---\n\n".join(summaries).strip() + "\n")
 
 
 def save_metadata_json(
@@ -70,10 +70,10 @@ def save_metadata_json(
     json_filename = f"{doc_stem}.{page_num:03d}.json"
     json_path = doc_output_dir / json_filename
 
-    # Strip transcription from metadata
+    # Strip transcription and summary from metadata (they have their own .md files)
     metadata_exams = []
     for exam in exams:
-        meta = {k: v for k, v in exam.items() if k != "transcription"}
+        meta = {k: v for k, v in exam.items() if k not in ("transcription", "summary")}
         metadata_exams.append(meta)
 
     with open(json_path, 'w', encoding='utf-8') as f:
@@ -106,7 +106,8 @@ def process_single_pdf(
     pdf_path: Path,
     output_path: Path,
     config: ExtractionConfig,
-    client: OpenAI
+    client: OpenAI,
+    page_filter: int | None = None
 ) -> Path | None:
     """
     Process a single PDF file.
@@ -116,9 +117,10 @@ def process_single_pdf(
         output_path: Base output directory
         config: Extraction configuration
         client: OpenAI client instance
+        page_filter: If set, only process this specific page number
 
     Returns:
-        Path to the generated CSV file, or None if processing failed
+        Number of exams extracted, or None if processing failed
     """
     doc_stem = pdf_path.stem
     doc_output_dir = output_path / doc_stem
@@ -137,6 +139,10 @@ def process_single_pdf(
     report_date = None
 
     for page_num, page_image in enumerate(pages, start=1):
+        # Skip pages if filter is active
+        if page_filter is not None and page_num != page_filter:
+            continue
+
         # Preprocess and save page image
         processed_image = preprocess_page_image(page_image)
         image_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.jpg"
@@ -296,7 +302,7 @@ def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: Op
             if summaries:
                 summary_path = doc_dir / f"{doc_stem}.{page_num:03d}.summary.md"
                 with open(summary_path, 'w', encoding='utf-8') as f:
-                    f.write("\n\n".join(summaries).strip() + "\n")
+                    f.write("\n\n---\n\n".join(summaries).strip() + "\n")
 
             # Update metadata JSON with new summary
             save_metadata_json(page_exams, doc_dir, doc_stem, page_num)
@@ -315,9 +321,11 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py --profile tsilva    # Run with a specific profile (required)
-  python main.py --list-profiles     # List available profiles
-  python main.py --profile tsilva --regenerate  # Regenerate summaries from existing .md files
+  python main.py --profile tsilva              # Process all new PDFs
+  python main.py --list-profiles               # List available profiles
+  python main.py -p tsilva --regenerate        # Regenerate summaries
+  python main.py -p tsilva -d exam.pdf         # Reprocess specific document
+  python main.py -p tsilva -d exam.pdf --page 2  # Reprocess specific page
         """
     )
     parser.add_argument(
@@ -334,6 +342,16 @@ Examples:
         "--regenerate",
         action="store_true",
         help="Regenerate summaries from existing transcription files"
+    )
+    parser.add_argument(
+        "--document", "-d",
+        type=str,
+        help="Process only this document (filename or stem). Forces reprocessing."
+    )
+    parser.add_argument(
+        "--page",
+        type=int,
+        help="Process only this page number (requires --document)"
     )
     return parser.parse_args()
 
@@ -358,6 +376,11 @@ def main():
     if not args.profile:
         print("Error: --profile is required.")
         print("Use --list-profiles to see available profiles.")
+        sys.exit(1)
+
+    # --page requires --document
+    if args.page and not args.document:
+        print("Error: --page requires --document")
         sys.exit(1)
 
     # Load configuration
@@ -438,23 +461,45 @@ def main():
         logger.warning("No PDF files found. Check INPUT_PATH and INPUT_FILE_REGEX.")
         return
 
-    # Check for already processed files
-    to_process = []
-    already_processed = 0
-    for pdf_path in pdf_files:
-        if is_document_processed(pdf_path, config.output_path):
-            logger.info(f"Skipping (already processed): {pdf_path.name}")
-            already_processed += 1
-        else:
-            to_process.append(pdf_path)
+    # Select documents to process
+    if args.document:
+        # Find the specific document (by filename or stem, case-insensitive)
+        doc_query = args.document.lower()
+        # Strip .pdf extension if present for stem matching
+        doc_query_stem = doc_query[:-4] if doc_query.endswith('.pdf') else doc_query
+        matches = [f for f in pdf_files
+                   if f.name.lower() == doc_query
+                   or f.stem.lower() == doc_query_stem]
+        if not matches:
+            logger.error(f"Document not found: {args.document}")
+            sys.exit(1)
+        if len(matches) > 1:
+            logger.error(f"Multiple matches for '{args.document}': {[m.name for m in matches]}")
+            sys.exit(1)
+        to_process = matches
+        page_info = f" (page {args.page})" if args.page else ""
+        logger.info(f"Force reprocessing: {to_process[0].name}{page_info}")
+    else:
+        # Check for already processed files
+        to_process = []
+        already_processed = 0
+        for pdf_path in pdf_files:
+            if is_document_processed(pdf_path, config.output_path):
+                logger.info(f"Skipping (already processed): {pdf_path.name}")
+                already_processed += 1
+            else:
+                to_process.append(pdf_path)
 
-    logger.info(f"Processing {len(to_process)} new PDFs, {already_processed} already processed")
+        logger.info(f"Processing {len(to_process)} new PDFs, {already_processed} already processed")
 
     # Process PDFs (sequential for now to avoid rate limits)
     total_exams = 0
     for pdf_path in tqdm(to_process, desc="Processing PDFs"):
         try:
-            exam_count = process_single_pdf(pdf_path, config.output_path, config, client)
+            exam_count = process_single_pdf(
+                pdf_path, config.output_path, config, client,
+                page_filter=args.page
+            )
             if exam_count:
                 total_exams += exam_count
         except Exception as e:

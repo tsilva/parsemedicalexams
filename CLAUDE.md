@@ -23,6 +23,12 @@ python main.py --list-profiles
 
 # Regenerate .md files from existing JSON extraction data
 python main.py --profile tsilva --regenerate
+
+# Reprocess a specific document (by filename or stem)
+python main.py -p tsilva -d exam_2024.pdf
+
+# Reprocess a specific page within a document
+python main.py -p tsilva -d exam_2024.pdf --page 2
 ```
 
 ## Architecture
