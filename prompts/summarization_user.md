@@ -1,13 +1,11 @@
-Translate and reformat this medical report to English with markdown formatting.
+Create a comprehensive clinical summary from the following medical exam transcriptions.
 
-IMPORTANT: Only translate what is written - do NOT add your own conclusions or interpretations. You are a translator, not a doctor.
+This summary will be part of a patient's permanent medical health record. Preserve ALL clinically relevant details - nothing should be lost.
 
-Use ## for the exam name header, **bold** for conclusion/impression labels (only if present in original). Remove administrative text (names, addresses, headers, footers).
+DOCUMENT CONTAINS {exam_count} EXAM(S):
+{exam_list}
 
-EXAM TYPE: {exam_type}
-EXAM NAME: {exam_name}
+TRANSCRIPTIONS:
+{transcriptions}
 
-TRANSCRIPTION:
-{transcription}
-
-TRANSLATION (markdown formatted, in English, no added conclusions):
+CLINICAL SUMMARY (comprehensive, in English, preserving all clinical details):

@@ -29,10 +29,10 @@ class MedicalExam(BaseModel):
         description="Exam date in YYYY-MM-DD format"
     )
     exam_name_raw: str = Field(
-        description="Exam name EXACTLY as shown in document (e.g., 'Radiografia do Tórax', 'Ecografia Abdominal')"
+        description="Document title EXACTLY as shown (e.g., 'Radiografia do Tórax', 'Ecografia Abdominal', 'Estudo do Sono (Questionário de Hábitos)')"
     )
     transcription: str = Field(
-        description="Full text of the exam report EXACTLY as written. Include ALL text visible in the report."
+        description="Full text of the document EXACTLY as written. Include ALL visible text: questions, answers, checkboxes, values, findings, conclusions."
     )
 
     # Internal fields (added by pipeline, not by LLM)
@@ -65,11 +65,11 @@ class MedicalExamReport(BaseModel):
     )
     page_has_exam_data: Optional[bool] = Field(
         default=None,
-        description="True if page contains exam results, False if administrative content"
+        description="True if page contains medical content (exam results, questionnaire responses, test data). False only for blank pages or administrative headers."
     )
     exams: List[MedicalExam] = Field(
         default_factory=list,
-        description="List of medical exams extracted from this page"
+        description="List of medical documents extracted from this page. Include exam reports, questionnaires, and any medical forms with content."
     )
     source_file: Optional[str] = Field(default=None, description="Source PDF filename")
 
@@ -96,8 +96,8 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "extract_medical_exams",
-            "description": "Extracts medical exam reports from document image",
+            "name": "extract_medical_documents",
+            "description": "Extracts and transcribes ALL content from medical document images including: exam reports, clinical notes, discharge summaries, administrative letters, cover pages, correspondence, and any other medical documentation. Must be called for ANY page with readable text.",
             "parameters": MedicalExamReport.model_json_schema()
         }
     }
@@ -246,7 +246,7 @@ def extract_exams_from_page_image(
             temperature=temperature,
             max_tokens=16384,
             tools=TOOLS,
-            tool_choice={"type": "function", "function": {"name": "extract_medical_exams"}}
+            tool_choice={"type": "function", "function": {"name": "extract_medical_documents"}}
         )
     except APIError as e:
         logger.error(f"API Error during exam extraction from {image_path.name}: {e}")
@@ -330,6 +330,110 @@ def _normalize_date_format(date_str: Optional[str]) -> Optional[str]:
     return None
 
 
+def _fix_malformed_json_string(text: str) -> str:
+    """
+    Fix malformed JSON strings returned by Gemini.
+    Issues handled:
+    - Unescaped newlines inside string values
+    - Unescaped quotes inside string values (from OCR errors like * -> ")
+    """
+    # First, try a regex-based approach to extract and fix the transcription field
+    # which is where most issues occur
+    import re
+
+    def fix_transcription_value(match):
+        """Escape problematic characters in transcription value."""
+        content = match.group(1)
+        # Escape any unescaped quotes (but not the ones that are already escaped)
+        # Replace " with \" unless preceded by \
+        fixed = re.sub(r'(?<!\\)"', r'\"', content)
+        # Escape literal newlines
+        fixed = fixed.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+        return f'"transcription": "{fixed}"'
+
+    # Try to fix the transcription field specifically
+    fixed = re.sub(
+        r'"transcription":\s*"((?:[^"\\]|\\.)*)(?="[,}]|\Z)',
+        fix_transcription_value,
+        text,
+        flags=re.DOTALL
+    )
+
+    # If regex didn't help, fall back to character-by-character approach
+    if fixed == text:
+        result = []
+        in_string = False
+        i = 0
+        while i < len(text):
+            char = text[i]
+            if char == '"':
+                # Check if this quote is a string delimiter or content
+                if not in_string:
+                    in_string = True
+                    result.append(char)
+                elif i + 1 < len(text) and text[i + 1] in ',}]:':
+                    # This quote ends a string (followed by JSON structure)
+                    in_string = False
+                    result.append(char)
+                elif i > 0 and text[i - 1] == '\\':
+                    # Already escaped
+                    result.append(char)
+                else:
+                    # Unescaped quote inside string - escape it
+                    result.append('\\"')
+            elif char == '\n' and in_string:
+                result.append('\\n')
+            elif char == '\r' and in_string:
+                result.append('\\r')
+            elif char == '\t' and in_string:
+                result.append('\\t')
+            else:
+                result.append(char)
+            i += 1
+        fixed = ''.join(result)
+
+    return fixed
+
+
+def _parse_yaml_like_exam(text: str) -> Optional[dict]:
+    """
+    Parse YAML-like exam string that Gemini sometimes returns.
+    Format: "key: value\nkey: value\n..."
+    """
+    if not text or ':' not in text:
+        return None
+
+    result = {}
+    lines = text.split('\n')
+    current_key = None
+    current_value_lines = []
+
+    for line in lines:
+        # Check if this line starts a new key
+        if ': ' in line and not line.startswith(' '):
+            # Save previous key-value pair
+            if current_key:
+                result[current_key] = '\n'.join(current_value_lines).strip()
+
+            # Parse new key-value
+            colon_idx = line.index(': ')
+            current_key = line[:colon_idx].strip()
+            current_value_lines = [line[colon_idx + 2:]]
+        elif current_key:
+            # Continuation of multi-line value
+            current_value_lines.append(line)
+
+    # Save last key-value pair
+    if current_key:
+        result[current_key] = '\n'.join(current_value_lines).strip()
+
+    # Validate required fields
+    if 'exam_name_raw' in result and 'transcription' in result:
+        return result
+
+    return None
+
+
 def _fix_date_formats(tool_result_dict: dict) -> dict:
     """Fix common date formatting issues and handle malformed exam entries."""
     # Fix date at report level
@@ -344,13 +448,25 @@ def _fix_date_formats(tool_result_dict: dict) -> dict:
             if exam is None:
                 continue
 
-            # Parse string exams as JSON (Gemini bug: returns JSON strings instead of objects)
+            # Parse string exams (Gemini bug: sometimes returns strings instead of objects)
             if isinstance(exam, str):
+                original_str = exam
+                # Try JSON first (Gemini sometimes returns unescaped newlines in strings)
                 try:
                     exam = json.loads(exam)
                 except json.JSONDecodeError:
-                    logger.warning(f"Failed to parse exam string as JSON: {exam[:100]}...")
-                    continue
+                    # Try fixing malformed JSON (unescaped newlines, quotes)
+                    try:
+                        fixed_str = _fix_malformed_json_string(original_str)
+                        exam = json.loads(fixed_str)
+                    except json.JSONDecodeError as e:
+                        logger.debug(f"JSON decode error after fix: {e}")
+                        # Try YAML-like format: "key: value\nkey: value"
+                        exam = _parse_yaml_like_exam(original_str)
+                        if exam is None:
+                            logger.warning(f"Failed to parse exam string: {original_str[:100]}...")
+                            logger.debug(f"Full exam string ({len(original_str)} chars): {original_str}")
+                            continue
 
             # Fix date format
             if isinstance(exam, dict) and "exam_date" in exam:

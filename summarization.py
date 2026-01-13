@@ -1,4 +1,4 @@
-"""Aggressive summarization of medical exam transcriptions."""
+"""Document-level summarization of medical exam transcriptions."""
 
 import logging
 from openai import OpenAI
@@ -8,40 +8,66 @@ from utils import load_prompt
 logger = logging.getLogger(__name__)
 
 
-def summarize_exam(
-    transcription: str,
-    exam_type: str,
-    exam_name: str,
+def summarize_document(
+    exams: list[dict],
     model_id: str,
     client: OpenAI
 ) -> str:
     """
-    Generate aggressive summary keeping only findings, impressions, recommendations.
+    Generate a comprehensive clinical summary for an entire document.
+
+    Concatenates all exam transcriptions and creates one unified summary
+    that preserves all clinically relevant details for medical records.
 
     Args:
-        transcription: Full text transcription of the exam
-        exam_type: Type of exam (imaging, ultrasound, endoscopy, other)
-        exam_name: Name of the specific exam
+        exams: List of exam dictionaries with transcription, exam_type, and exam_name_standardized
         model_id: Model to use for summarization
         client: OpenAI client instance
 
     Returns:
-        Aggressive summary containing only clinical findings, impressions, and recommendations
+        Comprehensive clinical summary of all exams in the document
     """
-    if not transcription or not transcription.strip():
+    if not exams:
         return ""
+
+    # Filter exams with transcriptions
+    exams_with_content = [e for e in exams if e.get("transcription", "").strip()]
+    if not exams_with_content:
+        return ""
+
+    # Build exam list for context
+    exam_list_items = []
+    for i, exam in enumerate(exams_with_content, 1):
+        exam_name = exam.get("exam_name_standardized") or exam.get("exam_name_raw", "Unknown")
+        exam_type = exam.get("exam_type", "other")
+        exam_date = exam.get("exam_date", "")
+        date_str = f" ({exam_date})" if exam_date else ""
+        exam_list_items.append(f"{i}. {exam_name} [{exam_type}]{date_str}")
+
+    exam_list = "\n".join(exam_list_items)
+
+    # Concatenate all transcriptions with clear separators
+    transcription_parts = []
+    for i, exam in enumerate(exams_with_content, 1):
+        exam_name = exam.get("exam_name_standardized") or exam.get("exam_name_raw", "Unknown")
+        page_num = exam.get("page_number", "?")
+        transcription = exam.get("transcription", "").strip()
+        transcription_parts.append(f"--- EXAM {i}: {exam_name} (Page {page_num}) ---\n{transcription}")
+
+    transcriptions = "\n\n".join(transcription_parts)
 
     # Load prompts
     system_prompt = load_prompt("summarization_system")
     user_prompt_template = load_prompt("summarization_user")
     user_prompt = user_prompt_template.format(
-        exam_type=exam_type,
-        exam_name=exam_name,
-        transcription=transcription
+        exam_count=len(exams_with_content),
+        exam_list=exam_list,
+        transcriptions=transcriptions
     )
 
     # LLM call
     try:
+        logger.info(f"Summarizing document with {len(exams_with_content)} exam(s)")
         completion = client.chat.completions.create(
             model=model_id,
             messages=[
@@ -49,7 +75,7 @@ def summarize_exam(
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.1,
-            max_tokens=2000
+            max_tokens=4000  # Increased for comprehensive summaries
         )
 
         if not completion or not completion.choices:
@@ -59,41 +85,5 @@ def summarize_exam(
         return completion.choices[0].message.content.strip()
 
     except Exception as e:
-        logger.error(f"Error during summarization: {e}")
+        logger.error(f"Error during document summarization: {e}")
         return ""
-
-
-def batch_summarize_exams(
-    exams: list[dict],
-    model_id: str,
-    client: OpenAI
-) -> list[dict]:
-    """
-    Add summary field to all exams.
-
-    Args:
-        exams: List of exam dictionaries with transcription, exam_type, and exam_name_standardized
-        model_id: Model to use for summarization
-        client: OpenAI client instance
-
-    Returns:
-        List of exam dictionaries with summary field added
-    """
-    for i, exam in enumerate(exams):
-        transcription = exam.get("transcription", "")
-        exam_type = exam.get("exam_type", "other")
-        exam_name = exam.get("exam_name_standardized") or exam.get("exam_name_raw", "Unknown")
-
-        if transcription:
-            logger.info(f"Summarizing exam {i+1}/{len(exams)}: {exam_name}")
-            exam["summary"] = summarize_exam(
-                transcription=transcription,
-                exam_type=exam_type,
-                exam_name=exam_name,
-                model_id=model_id,
-                client=client
-            )
-        else:
-            exam["summary"] = ""
-
-    return exams

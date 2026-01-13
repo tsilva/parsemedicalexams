@@ -3,6 +3,7 @@
 import argparse
 import json
 import re
+import shutil
 import sys
 import logging
 from collections import defaultdict
@@ -16,7 +17,7 @@ from tqdm import tqdm
 from config import ExtractionConfig, ProfileConfig
 from extraction import extract_exams_from_page_image, self_consistency
 from standardization import standardize_exam_types
-from summarization import batch_summarize_exams
+from summarization import summarize_document
 from utils import preprocess_page_image, setup_logging
 
 logger = logging.getLogger(__name__)
@@ -33,29 +34,35 @@ def is_document_processed(pdf_path: Path, output_path: Path) -> bool:
     return len(json_files) > 0
 
 
-def save_transcription_files(
+def save_transcription_file(
     exams: list[dict],
     doc_output_dir: Path,
     doc_stem: str,
     page_num: int
 ) -> None:
     """
-    Save transcription and summary as separate files.
+    Save page transcription as markdown file.
     - .md = raw transcription verbatim
-    - .summary.md = summary only
     """
-    # Transcription file - raw text only
     md_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.md"
     transcriptions = [exam.get("transcription", "") for exam in exams]
     with open(md_path, 'w', encoding='utf-8') as f:
         f.write("\n\n".join(transcriptions).strip() + "\n")
 
-    # Summary file - summaries only (with separators between multiple exams)
-    summaries = [exam.get("summary", "") for exam in exams if exam.get("summary")]
-    if summaries:
-        summary_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.summary.md"
+
+def save_document_summary(
+    summary: str,
+    doc_output_dir: Path,
+    doc_stem: str
+) -> None:
+    """
+    Save document-level summary as markdown file.
+    - .summary.md = comprehensive clinical summary for the entire document
+    """
+    if summary:
+        summary_path = doc_output_dir / f"{doc_stem}.summary.md"
         with open(summary_path, 'w', encoding='utf-8') as f:
-            f.write("\n\n---\n\n".join(summaries).strip() + "\n")
+            f.write(summary.strip() + "\n")
 
 
 def save_metadata_json(
@@ -125,6 +132,14 @@ def process_single_pdf(
     doc_stem = pdf_path.stem
     doc_output_dir = output_path / doc_stem
     doc_output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy source PDF to output directory (skip if already exists or permission denied)
+    dest_pdf = doc_output_dir / pdf_path.name
+    if not dest_pdf.exists():
+        try:
+            shutil.copy2(pdf_path, dest_pdf)
+        except PermissionError:
+            logger.warning(f"Could not copy PDF to output (permission denied): {pdf_path.name}")
 
     logger.info(f"Processing: {pdf_path.name}")
 
@@ -204,32 +219,33 @@ def process_single_pdf(
             exam["exam_type"] = exam_type
             exam["exam_name_standardized"] = std_name
 
-    # Generate summaries
-    all_exams = batch_summarize_exams(all_exams, config.summarize_model_id, client)
+    # Generate document-level summary from all transcriptions
+    document_summary = summarize_document(all_exams, config.summarize_model_id, client)
 
-    # Group exams by page and save one markdown file per page
+    # Group exams by page and save transcription/metadata files per page
     exams_by_page = defaultdict(list)
     for exam in all_exams:
         page_num = exam.get("page_number", 1)
         exams_by_page[page_num].append(exam)
 
-    md_paths = []
     for page_num, page_exams in sorted(exams_by_page.items()):
-        save_transcription_files(page_exams, doc_output_dir, doc_stem, page_num)
+        save_transcription_file(page_exams, doc_output_dir, doc_stem, page_num)
         save_metadata_json(page_exams, doc_output_dir, doc_stem, page_num)
-        md_paths.append(page_num)
 
-    logger.info(f"Saved {len(md_paths)} pages ({len(all_exams)} exams) for: {pdf_path.name}")
+    # Save one summary for the entire document
+    save_document_summary(document_summary, doc_output_dir, doc_stem)
+
+    logger.info(f"Saved {len(exams_by_page)} pages ({len(all_exams)} exams) for: {pdf_path.name}")
 
     return len(all_exams)
 
 
 def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: OpenAI):
     """
-    Regenerate summary files from existing transcription (.md) and metadata (.json) files.
+    Regenerate document-level summary files from existing transcription (.md) and metadata (.json) files.
 
     Reads transcription from .md files and metadata from .json files,
-    re-runs summarization, and saves updated .summary.md files.
+    re-runs document-level summarization, and saves updated .summary.md files.
     """
     # Find all document directories
     doc_dirs = [d for d in output_path.iterdir() if d.is_dir() and d.name != "logs"]
@@ -282,33 +298,17 @@ def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: Op
             logger.warning(f"No exams found in {doc_dir}")
             continue
 
-        # Re-run summarization with updated prompts
-        all_exams = batch_summarize_exams(all_exams, config.summarize_model_id, client)
-
-        # Delete existing .summary.md files only
+        # Delete existing .summary.md files (both old page-level and document-level)
         for old_summary in doc_dir.glob("*.summary.md"):
             old_summary.unlink()
 
-        # Group exams by page and save updated summary files and metadata
-        exams_by_page = defaultdict(list)
-        for exam in all_exams:
-            page_num = exam.get("page_number", 1)
-            exams_by_page[page_num].append(exam)
+        # Generate document-level summary
+        document_summary = summarize_document(all_exams, config.summarize_model_id, client)
 
-        pages_saved = 0
-        for page_num, page_exams in sorted(exams_by_page.items()):
-            # Save only summary file (transcription .md unchanged)
-            summaries = [exam.get("summary", "") for exam in page_exams if exam.get("summary")]
-            if summaries:
-                summary_path = doc_dir / f"{doc_stem}.{page_num:03d}.summary.md"
-                with open(summary_path, 'w', encoding='utf-8') as f:
-                    f.write("\n\n---\n\n".join(summaries).strip() + "\n")
+        # Save one summary for the entire document
+        save_document_summary(document_summary, doc_dir, doc_stem)
 
-            # Update metadata JSON with new summary
-            save_metadata_json(page_exams, doc_dir, doc_stem, page_num)
-            pages_saved += 1
-
-        logger.info(f"Regenerated summaries for {pages_saved} pages ({len(all_exams)} exams): {doc_stem}")
+        logger.info(f"Regenerated summary for {len(all_exams)} exams: {doc_stem}")
         total_exams += len(all_exams)
 
     return total_exams

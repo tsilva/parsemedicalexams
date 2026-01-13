@@ -37,14 +37,14 @@ python main.py -p tsilva -d exam_2024.pdf --page 2
 1. **PDF → Images**: Convert PDF pages to preprocessed JPG images (grayscale, resize, contrast enhancement)
 2. **Vision LLM Extraction**: Extract exam data using function calling with self-consistency voting (N extractions, LLM votes on best)
 3. **Standardization**: Classify exam types (imaging/ultrasound/endoscopy/other) and standardize names via LLM with JSON cache
-4. **Summarization**: Aggressive filtering to keep only findings, impressions, and recommendations
-5. **Output**: Individual markdown files per exam with YAML frontmatter
+4. **Summarization**: Document-level clinical summary preserving all findings, impressions, and recommendations
+5. **Output**: Per-page transcription files + one comprehensive summary per document
 
 ### Key Modules
 - **main.py**: Pipeline orchestration, PDF processing loop, CLI argument handling
 - **extraction.py**: Pydantic models (`MedicalExam`, `MedicalExamReport`), Vision LLM extraction with function calling, self-consistency voting
 - **standardization.py**: Exam type classification using LLM with persistent JSON cache in `config/cache/`
-- **summarization.py**: Aggressive text summarization using LLM with hash-based caching
+- **summarization.py**: Document-level clinical summarization using LLM (preserves all clinical details for medical records)
 - **config.py**: `ExtractionConfig` (from .env) and `ProfileConfig` (from profiles/*.json)
 - **utils.py**: Image preprocessing, logging setup, JSON parsing utilities
 
@@ -55,10 +55,12 @@ python main.py -p tsilva -d exam_2024.pdf --page 2
 - `prompts/*.md`: All LLM prompts externalized as markdown files
 
 ### Output Format
-Each page produces three files:
+Each page produces two files:
 - **`{doc_stem}.{page}.md`**: Raw transcription verbatim
-- **`{doc_stem}.{page}.summary.md`**: Summary only
 - **`{doc_stem}.{page}.json`**: Metadata only (no transcription)
+
+Each document produces one summary file:
+- **`{doc_stem}.summary.md`**: Comprehensive clinical summary of all exams in the document (preserves all findings for medical records)
 
 ## Patterns from labs-parser
 
