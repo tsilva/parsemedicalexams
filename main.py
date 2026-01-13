@@ -240,12 +240,13 @@ def process_single_pdf(
     return len(all_exams)
 
 
-def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: OpenAI):
+def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: OpenAI, input_path: Path | None = None):
     """
     Regenerate document-level summary files from existing transcription (.md) and metadata (.json) files.
 
     Reads transcription from .md files and metadata from .json files,
     re-runs document-level summarization, and saves updated .summary.md files.
+    If input_path is provided, also copies source PDFs to output directories if missing.
     """
     # Find all document directories
     doc_dirs = [d for d in output_path.iterdir() if d.is_dir() and d.name != "logs"]
@@ -255,6 +256,19 @@ def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: Op
     total_exams = 0
     for doc_dir in tqdm(doc_dirs, desc="Regenerating summaries"):
         doc_stem = doc_dir.name
+
+        # Copy source PDF if missing and input_path is provided
+        if input_path:
+            existing_pdfs = list(doc_dir.glob("*.pdf"))
+            if not existing_pdfs:
+                # Try to find source PDF in input directory
+                source_pdfs = list(input_path.glob(f"**/{doc_stem}.pdf"))
+                if source_pdfs:
+                    try:
+                        shutil.copy2(source_pdfs[0], doc_dir / source_pdfs[0].name)
+                        logger.info(f"Copied source PDF: {source_pdfs[0].name}")
+                    except PermissionError:
+                        logger.warning(f"Could not copy PDF (permission denied): {source_pdfs[0].name}")
 
         # Find all JSON metadata files (exclude .summary.md pattern)
         json_files = sorted([f for f in doc_dir.glob(f"{doc_stem}.*.json")])
@@ -323,7 +337,8 @@ def parse_args():
 Examples:
   python main.py --profile tsilva              # Process all new PDFs
   python main.py --list-profiles               # List available profiles
-  python main.py -p tsilva --regenerate        # Regenerate summaries
+  python main.py -p tsilva --regenerate        # Regenerate summaries only
+  python main.py -p tsilva --reprocess-all     # Force reprocess all documents
   python main.py -p tsilva -d exam.pdf         # Reprocess specific document
   python main.py -p tsilva -d exam.pdf --page 2  # Reprocess specific page
         """
@@ -342,6 +357,11 @@ Examples:
         "--regenerate",
         action="store_true",
         help="Regenerate summaries from existing transcription files"
+    )
+    parser.add_argument(
+        "--reprocess-all",
+        action="store_true",
+        help="Force reprocessing of all documents (ignores already processed)"
     )
     parser.add_argument(
         "--document", "-d",
@@ -441,7 +461,7 @@ def main():
     # Handle --regenerate mode
     if args.regenerate:
         logger.info("Regeneration mode: re-summarizing from existing transcription files")
-        total_exams = regenerate_summaries(config.output_path, config, client)
+        total_exams = regenerate_summaries(config.output_path, config, client, config.input_path)
         logger.info("=" * 60)
         logger.info("Regeneration Complete")
         logger.info("=" * 60)
@@ -479,6 +499,10 @@ def main():
         to_process = matches
         page_info = f" (page {args.page})" if args.page else ""
         logger.info(f"Force reprocessing: {to_process[0].name}{page_info}")
+    elif args.reprocess_all:
+        # Force reprocess all documents
+        to_process = pdf_files
+        logger.info(f"Force reprocessing all {len(to_process)} documents")
     else:
         # Check for already processed files
         to_process = []
