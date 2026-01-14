@@ -7,6 +7,8 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
 
+import yaml
+
 logger = logging.getLogger(__name__)
 
 UNKNOWN_VALUE = "$UNKNOWN$"
@@ -14,43 +16,51 @@ UNKNOWN_VALUE = "$UNKNOWN$"
 
 @dataclass
 class ProfileConfig:
-    """Configuration for a user profile."""
+    """Configuration for a user profile.
+
+    Supports both YAML and JSON formats. YAML is preferred.
+    """
     name: str
     input_path: Optional[Path] = None
     output_path: Optional[Path] = None
     input_file_regex: Optional[str] = None
 
+    # Optional overrides
+    model: Optional[str] = None
+    workers: Optional[int] = None
+
     @classmethod
-    def from_file(cls, profile_path: Path, env_config: Optional['ExtractionConfig'] = None) -> 'ProfileConfig':
-        """Load profile from JSON file, inheriting from env_config where needed."""
-        with open(profile_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+    def from_file(cls, profile_path: Path) -> 'ProfileConfig':
+        """Load profile from YAML or JSON file."""
+        if not profile_path.exists():
+            raise FileNotFoundError(f"Profile not found: {profile_path}")
 
-        # Parse paths, with inheritance from env_config
+        content = profile_path.read_text(encoding='utf-8')
+
+        # Parse based on extension
+        if profile_path.suffix in ('.yaml', '.yml'):
+            data = yaml.safe_load(content)
+        else:
+            # Default to JSON for backwards compatibility
+            data = json.load(open(profile_path, 'r', encoding='utf-8'))
+
+        # Extract paths (support both flat and nested structures for backwards compatibility)
         paths = data.get('paths', {})
-        inherit = data.get('settings', {}).get('inherit_from_env', True)
+        input_path_str = paths.get('input_path') or data.get('input_path')
+        output_path_str = paths.get('output_path') or data.get('output_path')
+        input_file_regex = paths.get('input_file_regex') or data.get('input_file_regex')
 
-        input_path = None
-        if paths.get('input_path'):
-            input_path = Path(paths['input_path'])
-        elif inherit and env_config:
-            input_path = env_config.input_path
-
-        output_path = None
-        if paths.get('output_path'):
-            output_path = Path(paths['output_path'])
-        elif inherit and env_config:
-            output_path = env_config.output_path
-
-        input_file_regex = paths.get('input_file_regex')
-        if not input_file_regex and inherit and env_config:
-            input_file_regex = env_config.input_file_regex
+        # Extract optional overrides
+        model = data.get('model')
+        workers = data.get('workers')
 
         return cls(
             name=data.get('name', profile_path.stem),
-            input_path=input_path,
-            output_path=output_path,
+            input_path=Path(input_path_str) if input_path_str else None,
+            output_path=Path(output_path_str) if output_path_str else None,
             input_file_regex=input_file_regex,
+            model=model,
+            workers=workers,
         )
 
     @classmethod
@@ -59,10 +69,11 @@ class ProfileConfig:
         if not profiles_dir.exists():
             return []
         profiles = []
-        for f in profiles_dir.glob("*.json"):
-            if not f.name.startswith("_"):  # Skip templates like _template.json
-                profiles.append(f.stem)
-        return sorted(profiles)
+        for ext in ('*.json', '*.yaml', '*.yml'):
+            for f in profiles_dir.glob(ext):
+                if not f.name.startswith('_'):  # Skip templates
+                    profiles.append(f.stem)
+        return sorted(set(profiles))
 
 
 @dataclass

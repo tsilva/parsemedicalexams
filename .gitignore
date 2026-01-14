@@ -44,5 +44,8 @@ config/cache/*.json
 Thumbs.db
 
 # Profiles (keep template, ignore user profiles)
+profiles/*.yaml
+profiles/*.yml
 profiles/*.json
+!profiles/_template.yaml
 !profiles/_template.json

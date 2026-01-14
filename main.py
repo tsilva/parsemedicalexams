@@ -477,7 +477,7 @@ Examples:
     parser.add_argument(
         "--profile", "-p",
         type=str,
-        help="Profile name (without .json extension)"
+        help="Profile name (without extension)"
     )
     parser.add_argument(
         "--list-profiles",
@@ -503,6 +503,23 @@ Examples:
         "--page",
         type=int,
         help="Process only this page number (requires --document)"
+    )
+
+    # Override arguments
+    parser.add_argument(
+        "--model", "-m",
+        type=str,
+        help="Model ID for extraction (overrides profile/env)"
+    )
+    parser.add_argument(
+        "--workers", "-w",
+        type=int,
+        help="Number of parallel workers (overrides profile/env)"
+    )
+    parser.add_argument(
+        "--pattern",
+        type=str,
+        help="Regex pattern for input files (overrides profile)"
     )
     return parser.parse_args()
 
@@ -534,39 +551,62 @@ def main():
         print("Error: --page requires --document")
         sys.exit(1)
 
-    # Load configuration
+    # Load profile (required)
+    profile_path = None
+    for ext in ('.yaml', '.yml', '.json'):
+        p = Path(f"profiles/{args.profile}{ext}")
+        if p.exists():
+            profile_path = p
+            break
+
+    if not profile_path:
+        print(f"Error: Profile '{args.profile}' not found")
+        print("Use --list-profiles to see available profiles.")
+        sys.exit(1)
+
+    profile = ProfileConfig.from_file(profile_path)
+
+    # Validate profile has required paths
+    if not profile.input_path:
+        print(f"Error: Profile '{args.profile}' has no input_path defined.")
+        sys.exit(1)
+    if not profile.output_path:
+        print(f"Error: Profile '{args.profile}' has no output_path defined.")
+        sys.exit(1)
+
+    # Validate input path exists
+    if not profile.input_path.exists():
+        print(f"Error: Input path does not exist: {profile.input_path}")
+        sys.exit(1)
+
+    # Ensure output directory exists
+    profile.output_path.mkdir(parents=True, exist_ok=True)
+
+    # Load base config from environment (API keys and model settings)
     config = ExtractionConfig.from_env()
 
+    # Apply profile paths to config
+    config.input_path = profile.input_path
+    config.output_path = profile.output_path
+    config.input_file_regex = profile.input_file_regex or config.input_file_regex or ".*\\.pdf"
+
     # Apply profile overrides
-    profile_path = Path("profiles") / f"{args.profile}.json"
-    if not profile_path.exists():
-        print(f"Profile not found: {profile_path}")
-        print(f"Available profiles: {ProfileConfig.list_profiles()}")
-        sys.exit(1)
-    profile = ProfileConfig.from_file(profile_path, config)
+    if profile.model:
+        config.extract_model_id = profile.model
+        config.self_consistency_model_id = profile.model
+        config.summarize_model_id = profile.model
+    if profile.workers:
+        config.max_workers = profile.workers
 
-    # Override config with profile paths
-    if profile.input_path:
-        config.input_path = profile.input_path
-    if profile.output_path:
-        config.output_path = profile.output_path
-        config.output_path.mkdir(parents=True, exist_ok=True)
-    if profile.input_file_regex:
-        config.input_file_regex = profile.input_file_regex
-
-    # Validate required paths after profile overrides
-    if not config.input_path:
-        print("Error: INPUT_PATH not set in .env or profile.")
-        sys.exit(1)
-    if not config.input_path.exists():
-        print(f"Error: INPUT_PATH does not exist: {config.input_path}")
-        sys.exit(1)
-    if not config.output_path:
-        print("Error: OUTPUT_PATH not set in .env or profile.")
-        sys.exit(1)
-    if not config.input_file_regex:
-        print("Error: INPUT_FILE_REGEX not set in .env or profile.")
-        sys.exit(1)
+    # Apply CLI overrides (highest priority)
+    if args.model:
+        config.extract_model_id = args.model
+        config.self_consistency_model_id = args.model
+        config.summarize_model_id = args.model
+    if args.workers:
+        config.max_workers = args.workers
+    if args.pattern:
+        config.input_file_regex = args.pattern
 
     # Setup logging
     log_dir = config.output_path / "logs"

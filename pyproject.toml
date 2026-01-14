@@ -28,6 +28,7 @@ dependencies = [
     "xlsxwriter",
     "python-dotenv",
     "pydantic",
+    "pyyaml",
     "tqdm",
 ]
 

@@ -1,0 +1,13 @@
+# Profile Template - Copy this file and rename to {your_name}.yaml
+name: "Your Name"
+
+# Required: Paths to input/output directories
+input_path: "/path/to/your/exam/pdfs"
+output_path: "/path/to/your/output"
+
+# Optional: Filter which PDFs to process (default: .*\.pdf)
+input_file_regex: ".*\\.pdf"
+
+# Optional overrides:
+# model: "google/gemini-2.5-flash"  # Extraction model
+# workers: 4                         # Parallel workers
