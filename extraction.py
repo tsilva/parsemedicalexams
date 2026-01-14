@@ -233,6 +233,7 @@ def vote_on_best_result(results: list, model_id: str, fn_name: str):
     try:
         completion = client.chat.completions.create(
             model=model_id,
+            temperature=0.1,  # Low temperature for deterministic voting
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}

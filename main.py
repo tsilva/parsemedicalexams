@@ -215,13 +215,29 @@ def process_single_pdf(
             if page_filter is not None and page_num != page_filter:
                 continue
 
-            # Transcribe page
+            # Transcribe page (with optional self-consistency voting)
+            confidence = None
             try:
-                transcription = transcribe_page(
-                    image_path,
-                    config.extract_model_id,
-                    client
-                )
+                if config.n_extractions > 1:
+                    transcription, all_transcriptions = self_consistency(
+                        transcribe_page,
+                        config.self_consistency_model_id,
+                        config.n_extractions,
+                        image_path,
+                        config.extract_model_id,
+                        client
+                    )
+                    # Calculate agreement level for confidence
+                    agreement_count = sum(1 for t in all_transcriptions if t == transcription)
+                    confidence = agreement_count / len(all_transcriptions)
+                    if confidence < 1.0:
+                        logger.info(f"Self-consistency: {agreement_count}/{len(all_transcriptions)} agreement for {image_path.name}")
+                else:
+                    transcription = transcribe_page(
+                        image_path,
+                        config.extract_model_id,
+                        client
+                    )
             except Exception as e:
                 logger.error(f"Transcription failed for {image_path.name}: {e}")
                 transcription = ""
@@ -235,7 +251,8 @@ def process_single_pdf(
                 "exam_date": exam_date,
                 "transcription": transcription,
                 "page_number": page_num,
-                "source_file": pdf_path.name
+                "source_file": pdf_path.name,
+                "transcription_confidence": confidence
             }
             all_exams.append(exam)
 
@@ -251,7 +268,8 @@ def process_single_pdf(
                     "exam_type": None,
                     "exam_name_standardized": None,
                     "page_number": page_num,
-                    "source_file": pdf_path.name
+                    "source_file": pdf_path.name,
+                    "transcription_confidence": confidence
                 }]
             }
             with open(json_path, 'w', encoding='utf-8') as f:
@@ -280,7 +298,8 @@ def process_single_pdf(
                     "exam_type": exam.get("exam_type"),
                     "exam_name_standardized": exam.get("exam_name_standardized"),
                     "page_number": page_num,
-                    "source_file": pdf_path.name
+                    "source_file": pdf_path.name,
+                    "transcription_confidence": exam.get("transcription_confidence")
                 }]
             }
             with open(json_path, 'w', encoding='utf-8') as f:
