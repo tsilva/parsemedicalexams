@@ -91,7 +91,35 @@ class MedicalExamReport(BaseModel):
                     setattr(exam, field_name, None)
 
 
-# Tool definition for function calling
+class DocumentClassification(BaseModel):
+    """Document classification result."""
+
+    is_exam: bool = Field(
+        description="True if the document contains medical exam results, clinical reports, or medical content that should be transcribed"
+    )
+    exam_name_raw: Optional[str] = Field(
+        default=None,
+        description="Document title or exam name exactly as written (e.g., 'CABELO: NUTRIENTES E METAIS TÓXICOS')"
+    )
+    exam_date: Optional[str] = Field(
+        default=None,
+        description="Exam date in YYYY-MM-DD format"
+    )
+    facility_name: Optional[str] = Field(
+        default=None,
+        description="Healthcare facility name (e.g., 'SYNLAB', 'Hospital Santo António')"
+    )
+
+
+class PageTranscription(BaseModel):
+    """Simple page transcription result."""
+
+    transcription: str = Field(
+        description="Complete verbatim transcription of all text visible on the page"
+    )
+
+
+# Tool definitions for function calling
 TOOLS = [
     {
         "type": "function",
@@ -99,6 +127,28 @@ TOOLS = [
             "name": "extract_medical_documents",
             "description": "Extracts and transcribes ALL content from medical document images including: exam reports, clinical notes, discharge summaries, administrative letters, cover pages, correspondence, and any other medical documentation. Must be called for ANY page with readable text.",
             "parameters": MedicalExamReport.model_json_schema()
+        }
+    }
+]
+
+CLASSIFICATION_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "classify_document",
+            "description": "Classifies whether a document contains medical exam results, clinical reports, or other medical content that should be transcribed.",
+            "parameters": DocumentClassification.model_json_schema()
+        }
+    }
+]
+
+TRANSCRIPTION_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "transcribe_page",
+            "description": "Transcribes all visible text from a page verbatim.",
+            "parameters": PageTranscription.model_json_schema()
         }
     }
 ]
@@ -304,6 +354,143 @@ def extract_exams_from_page_image(
         return MedicalExamReport(exams=[]).model_dump(mode='json')
 
 
+def classify_document(
+    image_paths: List[Path],
+    model_id: str,
+    client: OpenAI,
+    temperature: float = 0.1
+) -> DocumentClassification:
+    """
+    Classify whether a document is a medical exam by analyzing all pages.
+
+    Args:
+        image_paths: List of paths to preprocessed page images
+        model_id: Vision model to use for classification
+        client: OpenAI client instance
+        temperature: Temperature for sampling (low for classification)
+
+    Returns:
+        DocumentClassification with is_exam, exam_name_raw, exam_date, facility_name
+    """
+    # Build image content for all pages
+    image_content = []
+    for image_path in image_paths:
+        with open(image_path, "rb") as img_file:
+            img_data = base64.standard_b64encode(img_file.read()).decode("utf-8")
+        image_content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{img_data}"}
+        })
+
+    system_prompt = load_prompt("classification_system")
+    user_prompt = load_prompt("classification_user")
+
+    try:
+        completion = client.chat.completions.create(
+            model=model_id,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": [
+                    {"type": "text", "text": user_prompt},
+                    *image_content
+                ]}
+            ],
+            temperature=temperature,
+            max_tokens=1024,
+            tools=CLASSIFICATION_TOOLS,
+            tool_choice={"type": "function", "function": {"name": "classify_document"}}
+        )
+    except APIError as e:
+        logger.error(f"API Error during document classification: {e}")
+        # Default to is_exam=True to avoid missing medical content
+        return DocumentClassification(is_exam=True)
+
+    if not completion or not completion.choices or len(completion.choices) == 0:
+        logger.error("Invalid completion response for classification")
+        return DocumentClassification(is_exam=True)
+
+    if not completion.choices[0].message.tool_calls:
+        logger.warning("No tool call by model for document classification")
+        return DocumentClassification(is_exam=True)
+
+    tool_args_raw = completion.choices[0].message.tool_calls[0].function.arguments
+    try:
+        tool_result_dict = json.loads(tool_args_raw)
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error for classification: {e}")
+        return DocumentClassification(is_exam=True)
+
+    # Normalize date format
+    if tool_result_dict.get("exam_date"):
+        tool_result_dict["exam_date"] = _normalize_date_format(tool_result_dict["exam_date"])
+
+    try:
+        return DocumentClassification(**tool_result_dict)
+    except Exception as e:
+        logger.error(f"Validation error for classification: {e}")
+        return DocumentClassification(is_exam=True)
+
+
+def transcribe_page(
+    image_path: Path,
+    model_id: str,
+    client: OpenAI,
+    temperature: float = 0.1
+) -> str:
+    """
+    Transcribe all visible text from a page verbatim.
+
+    Args:
+        image_path: Path to the preprocessed page image
+        model_id: Vision model to use for transcription
+        client: OpenAI client instance
+        temperature: Temperature for sampling (low for OCR)
+
+    Returns:
+        String with complete verbatim transcription
+    """
+    with open(image_path, "rb") as img_file:
+        img_data = base64.standard_b64encode(img_file.read()).decode("utf-8")
+
+    system_prompt = load_prompt("transcription_system")
+    user_prompt = load_prompt("transcription_user")
+
+    try:
+        completion = client.chat.completions.create(
+            model=model_id,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": [
+                    {"type": "text", "text": user_prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_data}"}}
+                ]}
+            ],
+            temperature=temperature,
+            max_tokens=16384,
+            tools=TRANSCRIPTION_TOOLS,
+            tool_choice={"type": "function", "function": {"name": "transcribe_page"}}
+        )
+    except APIError as e:
+        logger.error(f"API Error during page transcription from {image_path.name}: {e}")
+        return ""
+
+    if not completion or not completion.choices or len(completion.choices) == 0:
+        logger.error(f"Invalid completion response for transcription of {image_path.name}")
+        return ""
+
+    if not completion.choices[0].message.tool_calls:
+        logger.warning(f"No tool call by model for transcription of {image_path.name}")
+        return ""
+
+    tool_args_raw = completion.choices[0].message.tool_calls[0].function.arguments
+    try:
+        tool_result_dict = json.loads(tool_args_raw)
+        return tool_result_dict.get("transcription", "")
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error for transcription: {e}")
+        return ""
+
+
 def _normalize_date_format(date_str: Optional[str]) -> Optional[str]:
     """
     Normalize date strings to YYYY-MM-DD format.
@@ -451,13 +638,16 @@ def _fix_date_formats(tool_result_dict: dict) -> dict:
             # Parse string exams (Gemini bug: sometimes returns strings instead of objects)
             if isinstance(exam, str):
                 original_str = exam
+                # Fix invalid JSON escapes that Gemini sometimes produces
+                # \' is valid in JS/Python but NOT in JSON - replace with unescaped '
+                exam = exam.replace("\\'", "'")
                 # Try JSON first (Gemini sometimes returns unescaped newlines in strings)
                 try:
                     exam = json.loads(exam)
                 except json.JSONDecodeError:
                     # Try fixing malformed JSON (unescaped newlines, quotes)
                     try:
-                        fixed_str = _fix_malformed_json_string(original_str)
+                        fixed_str = _fix_malformed_json_string(exam)  # Use already-fixed string
                         exam = json.loads(fixed_str)
                     except json.JSONDecodeError as e:
                         logger.debug(f"JSON decode error after fix: {e}")

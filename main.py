@@ -6,6 +6,7 @@ import re
 import shutil
 import sys
 import logging
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -15,7 +16,13 @@ from dotenv import load_dotenv
 from tqdm import tqdm
 
 from config import ExtractionConfig, ProfileConfig
-from extraction import extract_exams_from_page_image, self_consistency
+from extraction import (
+    extract_exams_from_page_image,
+    self_consistency,
+    classify_document,
+    transcribe_page,
+    DocumentClassification
+)
 from standardization import standardize_exam_types
 from summarization import summarize_document
 from utils import preprocess_page_image, setup_logging
@@ -115,9 +122,11 @@ def process_single_pdf(
     config: ExtractionConfig,
     client: OpenAI,
     page_filter: int | None = None
-) -> Path | None:
+) -> int | None | str:
     """
-    Process a single PDF file.
+    Process a single PDF file using two-phase approach:
+    1. Classify document (is it a medical exam?)
+    2. If yes, transcribe all pages verbatim
 
     Args:
         pdf_path: Path to the PDF file
@@ -127,116 +136,161 @@ def process_single_pdf(
         page_filter: If set, only process this specific page number
 
     Returns:
-        Number of exams extracted, or None if processing failed
+        Number of pages processed if success
+        None if processing failed
+        "skipped" if document is not a medical exam
     """
     doc_stem = pdf_path.stem
-    doc_output_dir = output_path / doc_stem
-    doc_output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Copy source PDF to output directory (skip if already exists or permission denied)
-    dest_pdf = doc_output_dir / pdf_path.name
-    if not dest_pdf.exists():
-        try:
-            shutil.copy2(pdf_path, dest_pdf)
-        except PermissionError:
-            logger.warning(f"Could not copy PDF to output (permission denied): {pdf_path.name}")
-
     logger.info(f"Processing: {pdf_path.name}")
 
-    # Convert PDF to images
+    # Convert PDF to images in temp directory first (before classification)
     try:
         pages = convert_from_path(str(pdf_path))
     except Exception as e:
         logger.error(f"Failed to convert PDF to images: {pdf_path.name}: {e}")
         return None
 
-    all_exams = []
-    report_date = None
+    # Create temp directory for classification images
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        temp_image_paths = []
 
-    for page_num, page_image in enumerate(pages, start=1):
-        # Skip pages if filter is active
-        if page_filter is not None and page_num != page_filter:
-            continue
+        # Preprocess and save images to temp directory
+        for page_num, page_image in enumerate(pages, start=1):
+            processed_image = preprocess_page_image(page_image)
+            temp_image_path = temp_path / f"{doc_stem}.{page_num:03d}.jpg"
+            processed_image.save(str(temp_image_path), "JPEG", quality=95)
+            temp_image_paths.append(temp_image_path)
 
-        # Preprocess and save page image
-        processed_image = preprocess_page_image(page_image)
-        image_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.jpg"
-        processed_image.save(str(image_path), "JPEG", quality=95)
-
-        # Extract exams from page using self-consistency
+        # PHASE 1: Classify document
+        logger.debug(f"Classifying document: {pdf_path.name} ({len(temp_image_paths)} pages)")
         try:
-            extraction_result, _ = self_consistency(
-                extract_exams_from_page_image,
-                config.self_consistency_model_id,
-                config.n_extractions,
-                image_path,
+            classification = classify_document(
+                temp_image_paths,
                 config.extract_model_id,
                 client
             )
         except Exception as e:
-            logger.error(f"Extraction failed for {image_path.name}: {e}")
-            extraction_result = {"exams": [], "page_has_exam_data": None}
+            logger.error(f"Classification failed for {pdf_path.name}: {e}")
+            # Default to treating as exam to avoid missing content
+            classification = DocumentClassification(is_exam=True)
 
-        # Save raw extraction JSON
-        json_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.json"
-        with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(extraction_result, f, ensure_ascii=False, indent=2)
+        # If not an exam, skip this document
+        if not classification.is_exam:
+            logger.info(f"Skipped (not a medical exam): {pdf_path.name}")
+            return "skipped"
 
-        # Capture report date from first page if available
-        if page_num == 1 and extraction_result.get("report_date"):
-            report_date = extraction_result["report_date"]
+        # PHASE 2: Document is an exam - create output directory and transcribe all pages
+        doc_output_dir = output_path / doc_stem
+        doc_output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Process extracted exams
-        for exam in extraction_result.get("exams", []):
-            exam["source_file"] = pdf_path.name
-            exam["page_number"] = page_num
+        # Copy source PDF to output directory
+        dest_pdf = doc_output_dir / pdf_path.name
+        if not dest_pdf.exists():
+            try:
+                shutil.copy2(pdf_path, dest_pdf)
+            except PermissionError:
+                logger.warning(f"Could not copy PDF to output (permission denied): {pdf_path.name}")
 
-            # Resolve exam date
-            if not exam.get("exam_date"):
-                exam["exam_date"] = report_date
+        # Move images from temp to output directory
+        image_paths = []
+        for temp_image_path in temp_image_paths:
+            final_image_path = doc_output_dir / temp_image_path.name
+            shutil.copy2(temp_image_path, final_image_path)
+            image_paths.append(final_image_path)
 
+        # Get document-level metadata from classification
+        exam_name = classification.exam_name_raw or doc_stem
+        exam_date = classification.exam_date
+        facility_name = classification.facility_name
+
+        # Try to extract date from filename if not found in classification
+        if not exam_date:
+            exam_date = extract_date_from_filename(pdf_path.name)
+
+        # Transcribe all pages
+        all_exams = []
+        for page_num, image_path in enumerate(image_paths, start=1):
+            # Skip pages if filter is active
+            if page_filter is not None and page_num != page_filter:
+                continue
+
+            # Transcribe page
+            try:
+                transcription = transcribe_page(
+                    image_path,
+                    config.extract_model_id,
+                    client
+                )
+            except Exception as e:
+                logger.error(f"Transcription failed for {image_path.name}: {e}")
+                transcription = ""
+
+            if not transcription:
+                logger.warning(f"Empty transcription for {image_path.name}")
+
+            # Create exam entry for this page
+            exam = {
+                "exam_name_raw": exam_name,
+                "exam_date": exam_date,
+                "transcription": transcription,
+                "page_number": page_num,
+                "source_file": pdf_path.name
+            }
             all_exams.append(exam)
 
-    # If no exams extracted but we have pages, try to extract date from filename
-    if not all_exams:
-        logger.warning(f"No exams extracted from {pdf_path.name}")
-        return None
+            # Save transcription file
+            save_transcription_file([exam], doc_output_dir, doc_stem, page_num)
 
-    # Resolve dates from filename if missing
-    filename_date = extract_date_from_filename(pdf_path.name)
-    for exam in all_exams:
-        if not exam.get("exam_date") and filename_date:
-            exam["exam_date"] = filename_date
+            # Save metadata JSON (without transcription)
+            json_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.json"
+            metadata = {
+                "exams": [{
+                    "exam_date": exam_date,
+                    "exam_name_raw": exam_name,
+                    "exam_type": None,
+                    "exam_name_standardized": None,
+                    "page_number": page_num,
+                    "source_file": pdf_path.name
+                }]
+            }
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, ensure_ascii=False, indent=2)
 
     # Standardize exam types
-    raw_names = [exam.get("exam_name_raw", "") for exam in all_exams]
-    standardized = standardize_exam_types(raw_names, config.extract_model_id, client)
+    if all_exams:
+        raw_names = list(set(exam.get("exam_name_raw", "") for exam in all_exams))
+        standardized = standardize_exam_types(raw_names, config.extract_model_id, client)
 
-    for exam in all_exams:
-        raw_name = exam.get("exam_name_raw", "")
-        if raw_name in standardized:
-            exam_type, std_name = standardized[raw_name]
-            exam["exam_type"] = exam_type
-            exam["exam_name_standardized"] = std_name
+        for exam in all_exams:
+            raw_name = exam.get("exam_name_raw", "")
+            if raw_name in standardized:
+                exam_type, std_name = standardized[raw_name]
+                exam["exam_type"] = exam_type
+                exam["exam_name_standardized"] = std_name
 
-    # Generate document-level summary from all transcriptions
-    document_summary = summarize_document(all_exams, config.summarize_model_id, client)
+        # Update JSON files with standardized info
+        for exam in all_exams:
+            page_num = exam.get("page_number", 1)
+            json_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.json"
+            metadata = {
+                "exams": [{
+                    "exam_date": exam.get("exam_date"),
+                    "exam_name_raw": exam.get("exam_name_raw"),
+                    "exam_type": exam.get("exam_type"),
+                    "exam_name_standardized": exam.get("exam_name_standardized"),
+                    "page_number": page_num,
+                    "source_file": pdf_path.name
+                }]
+            }
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, ensure_ascii=False, indent=2)
 
-    # Group exams by page and save transcription/metadata files per page
-    exams_by_page = defaultdict(list)
-    for exam in all_exams:
-        page_num = exam.get("page_number", 1)
-        exams_by_page[page_num].append(exam)
+        # Generate document-level summary
+        document_summary = summarize_document(all_exams, config.summarize_model_id, client)
+        save_document_summary(document_summary, doc_output_dir, doc_stem)
 
-    for page_num, page_exams in sorted(exams_by_page.items()):
-        save_transcription_file(page_exams, doc_output_dir, doc_stem, page_num)
-        save_metadata_json(page_exams, doc_output_dir, doc_stem, page_num)
-
-    # Save one summary for the entire document
-    save_document_summary(document_summary, doc_output_dir, doc_stem)
-
-    logger.info(f"Saved {len(exams_by_page)} pages ({len(all_exams)} exams) for: {pdf_path.name}")
-
+    logger.info(f"Processed {len(all_exams)} pages for: {pdf_path.name}")
     return len(all_exams)
 
 
@@ -326,6 +380,64 @@ def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: Op
         total_exams += len(all_exams)
 
     return total_exams
+
+
+def validate_pipeline_outputs(
+    pdf_files: list[Path],
+    output_path: Path
+) -> list[str]:
+    """
+    Validate that all expected output files exist for each source PDF.
+
+    Returns list of missing file paths (empty if all complete).
+    """
+    missing = []
+
+    for pdf_path in pdf_files:
+        doc_stem = pdf_path.stem
+        doc_output_dir = output_path / doc_stem
+
+        # Check target folder exists
+        if not doc_output_dir.exists():
+            missing.append(f"Missing target folder: {doc_output_dir}")
+            continue  # Can't check other files if folder doesn't exist
+
+        # Check source PDF copy
+        pdf_copy = doc_output_dir / pdf_path.name
+        if not pdf_copy.exists():
+            missing.append(f"Missing source PDF copy: {pdf_copy}")
+
+        # Get page count from source PDF
+        try:
+            pages = convert_from_path(str(pdf_path))
+            page_count = len(pages)
+        except Exception as e:
+            missing.append(f"Could not read PDF to count pages: {pdf_path} ({e})")
+            continue
+
+        # Check per-page files
+        for page_num in range(1, page_count + 1):
+            # Image
+            img_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.jpg"
+            if not img_path.exists():
+                missing.append(f"Missing page image: {img_path}")
+
+            # Metadata
+            json_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.json"
+            if not json_path.exists():
+                missing.append(f"Missing page metadata: {json_path}")
+
+            # Transcription
+            md_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.md"
+            if not md_path.exists():
+                missing.append(f"Missing page transcription: {md_path}")
+
+        # Check document summary
+        summary_path = doc_output_dir / f"{doc_stem}.summary.md"
+        if not summary_path.exists():
+            missing.append(f"Missing document summary: {summary_path}")
+
+    return missing
 
 
 def parse_args():
@@ -517,23 +629,58 @@ def main():
         logger.info(f"Processing {len(to_process)} new PDFs, {already_processed} already processed")
 
     # Process PDFs (sequential for now to avoid rate limits)
-    total_exams = 0
+    total_pages = 0
+    skipped_documents = []
+    processed_documents = []
+    failed_count = 0
+
     for pdf_path in tqdm(to_process, desc="Processing PDFs"):
         try:
-            exam_count = process_single_pdf(
+            result = process_single_pdf(
                 pdf_path, config.output_path, config, client,
                 page_filter=args.page
             )
-            if exam_count:
-                total_exams += exam_count
+            if result == "skipped":
+                skipped_documents.append(pdf_path.name)
+            elif isinstance(result, int):
+                total_pages += result
+                processed_documents.append(pdf_path)
+            else:
+                failed_count += 1
         except Exception as e:
             logger.error(f"Failed to process {pdf_path.name}: {e}")
+            failed_count += 1
 
     # Summary
     logger.info("=" * 60)
     logger.info("Pipeline Complete")
     logger.info("=" * 60)
-    logger.info(f"Processed {len(to_process)} PDFs, extracted {total_exams} exams")
+    logger.info(f"Processed: {len(processed_documents)} documents ({total_pages} pages)")
+    logger.info(f"Skipped (not medical exams): {len(skipped_documents)}")
+    if failed_count > 0:
+        logger.warning(f"Failed: {failed_count}")
+
+    # Report skipped documents for false negative review
+    if skipped_documents:
+        logger.info("=" * 60)
+        logger.info("Skipped Documents (review for false negatives):")
+        logger.info("=" * 60)
+        for doc_name in skipped_documents:
+            logger.info(f"  - {doc_name}")
+
+    # Validate outputs for processed documents only (not skipped ones)
+    logger.info("Validating pipeline outputs...")
+    missing_outputs = validate_pipeline_outputs(processed_documents, config.output_path)
+
+    if missing_outputs:
+        logger.warning("=" * 60)
+        logger.warning("⚠️  Missing outputs detected:")
+        logger.warning("=" * 60)
+        for item in missing_outputs:
+            logger.warning(f"  ⚠️  {item}")
+        logger.warning(f"⚠️  Total missing: {len(missing_outputs)}")
+    else:
+        logger.info("All outputs validated successfully")
 
 
 if __name__ == "__main__":
