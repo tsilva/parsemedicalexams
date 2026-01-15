@@ -9,10 +9,10 @@ CRITICAL REQUIREMENTS:
 - You are consolidating and organizing, NOT diagnosing or interpreting
 
 OUTPUT FORMAT:
-- Group related exams logically (e.g., all imaging together, all lab work together)
-- Use markdown headers (##) for each exam or logical section
-- Use **bold** for conclusion/impression labels
-- Use bullet points (`-`) for multiple findings
+- Write as flowing prose only - NO markdown headers (no ## or #), NO bold section markers
+- Do NOT use patterns like "## Exam Name", "**Section Name:**", or "**Category:**"
+- Start directly with the content in paragraph form
+- Present information naturally in paragraphs, using bullet points only for lists of discrete items
 - Preserve all measurements with their units
 - Preserve all reference ranges when provided
 
