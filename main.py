@@ -524,60 +524,43 @@ Examples:
     return parser.parse_args()
 
 
-def main():
-    """Main pipeline entry point."""
-    load_dotenv()
-    args = parse_args()
+def run_profile(profile_name: str, args) -> bool:
+    """
+    Run the pipeline for a single profile.
 
-    # Handle --list-profiles
-    if args.list_profiles:
-        profiles = ProfileConfig.list_profiles()
-        if profiles:
-            print("Available profiles:")
-            for p in profiles:
-                print(f"  - {p}")
-        else:
-            print("No profiles found in profiles/ directory")
-        return
+    Args:
+        profile_name: Name of the profile to run
+        args: Parsed command line arguments
 
-    # Profile is required
-    if not args.profile:
-        print("Error: --profile is required.")
-        print("Use --list-profiles to see available profiles.")
-        sys.exit(1)
-
-    # --page requires --document
-    if args.page and not args.document:
-        print("Error: --page requires --document")
-        sys.exit(1)
-
-    # Load profile (required)
+    Returns:
+        True if successful, False otherwise
+    """
+    # Load profile
     profile_path = None
     for ext in ('.yaml', '.yml', '.json'):
-        p = Path(f"profiles/{args.profile}{ext}")
+        p = Path(f"profiles/{profile_name}{ext}")
         if p.exists():
             profile_path = p
             break
 
     if not profile_path:
-        print(f"Error: Profile '{args.profile}' not found")
-        print("Use --list-profiles to see available profiles.")
-        sys.exit(1)
+        print(f"Error: Profile '{profile_name}' not found")
+        return False
 
     profile = ProfileConfig.from_file(profile_path)
 
     # Validate profile has required paths
     if not profile.input_path:
-        print(f"Error: Profile '{args.profile}' has no input_path defined.")
-        sys.exit(1)
+        print(f"Error: Profile '{profile_name}' has no input_path defined.")
+        return False
     if not profile.output_path:
-        print(f"Error: Profile '{args.profile}' has no output_path defined.")
-        sys.exit(1)
+        print(f"Error: Profile '{profile_name}' has no output_path defined.")
+        return False
 
     # Validate input path exists
     if not profile.input_path.exists():
         print(f"Error: Input path does not exist: {profile.input_path}")
-        sys.exit(1)
+        return False
 
     # Ensure output directory exists
     profile.output_path.mkdir(parents=True, exist_ok=True)
@@ -615,8 +598,7 @@ def main():
     logger.info("=" * 60)
     logger.info("Medical Exams Parser - Starting Pipeline")
     logger.info("=" * 60)
-    if profile:
-        logger.info(f"Profile: {profile.name}")
+    logger.info(f"Profile: {profile.name}")
     logger.info(f"Input path: {config.input_path}")
     logger.info(f"Output path: {config.output_path}")
     logger.info(f"Extract model: {config.extract_model_id}")
@@ -637,7 +619,7 @@ def main():
         logger.info("Regeneration Complete")
         logger.info("=" * 60)
         logger.info(f"Regenerated summaries for {total_exams} exams")
-        return
+        return True
 
     # Find PDF files
     pdf_pattern = re.compile(config.input_file_regex)
@@ -650,7 +632,7 @@ def main():
 
     if not pdf_files:
         logger.warning("No PDF files found. Check INPUT_PATH and INPUT_FILE_REGEX.")
-        return
+        return True
 
     # Select documents to process
     if args.document:
@@ -663,10 +645,10 @@ def main():
                    or f.stem.lower() == doc_query_stem]
         if not matches:
             logger.error(f"Document not found: {args.document}")
-            sys.exit(1)
+            return False
         if len(matches) > 1:
             logger.error(f"Multiple matches for '{args.document}': {[m.name for m in matches]}")
-            sys.exit(1)
+            return False
         to_process = matches
         page_info = f" (page {args.page})" if args.page else ""
         logger.info(f"Force reprocessing: {to_process[0].name}{page_info}")
@@ -733,13 +715,73 @@ def main():
 
     if missing_outputs:
         logger.warning("=" * 60)
-        logger.warning("⚠️  Missing outputs detected:")
+        logger.warning("Missing outputs detected:")
         logger.warning("=" * 60)
         for item in missing_outputs:
-            logger.warning(f"  ⚠️  {item}")
-        logger.warning(f"⚠️  Total missing: {len(missing_outputs)}")
+            logger.warning(f"  {item}")
+        logger.warning(f"Total missing: {len(missing_outputs)}")
     else:
         logger.info("All outputs validated successfully")
+
+    return True
+
+
+def main():
+    """Main pipeline entry point."""
+    load_dotenv()
+    args = parse_args()
+
+    # Handle --list-profiles
+    if args.list_profiles:
+        profiles = ProfileConfig.list_profiles()
+        if profiles:
+            print("Available profiles:")
+            for p in profiles:
+                print(f"  - {p}")
+        else:
+            print("No profiles found in profiles/ directory")
+        return
+
+    # --page requires --document
+    if args.page and not args.document:
+        print("Error: --page requires --document")
+        sys.exit(1)
+
+    # Determine which profiles to run
+    if args.profile:
+        profiles_to_run = [args.profile]
+    else:
+        # No profile specified - run all profiles
+        profiles_to_run = ProfileConfig.list_profiles()
+        if not profiles_to_run:
+            print("No profiles found in profiles/ directory")
+            print("Use --list-profiles to see available profiles or create a profile.")
+            sys.exit(1)
+        print(f"Running all {len(profiles_to_run)} profiles: {', '.join(profiles_to_run)}")
+
+    # Run each profile
+    success_count = 0
+    failed_profiles = []
+
+    for profile_name in profiles_to_run:
+        print(f"\n{'=' * 60}")
+        print(f"Running profile: {profile_name}")
+        print("=" * 60)
+
+        if run_profile(profile_name, args):
+            success_count += 1
+        else:
+            failed_profiles.append(profile_name)
+
+    # Summary when running multiple profiles
+    if len(profiles_to_run) > 1:
+        print(f"\n{'=' * 60}")
+        print("All Profiles Summary")
+        print("=" * 60)
+        print(f"Successful: {success_count}/{len(profiles_to_run)}")
+        if failed_profiles:
+            print(f"Failed profiles: {', '.join(failed_profiles)}")
+            sys.exit(1)
 
 
 if __name__ == "__main__":

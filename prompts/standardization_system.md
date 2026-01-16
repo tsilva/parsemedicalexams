@@ -6,6 +6,8 @@ EXAM TYPE GUIDELINES:
 - imaging: X-ray, MRI, CT, Mammography, DEXA, PET scans, angiography
 - ultrasound: Ultrasound, Echocardiogram, Doppler studies
 - endoscopy: Any scope procedure (gastroscopy, colonoscopy, bronchoscopy, cystoscopy, etc.)
+- prescription: Medical prescriptions, medication orders (Receita, Prescrição)
+- appointment: Appointment notices, scheduling confirmations (Marcação, Convocatória)
 - other: ECG, EEG, Spirometry, Sleep studies, Holter, stress tests, biopsies, pathology
 
 RULES:
@@ -20,3 +22,7 @@ EXAMPLES:
 - "EDA" → {"exam_type": "endoscopy", "standardized_name": "Upper GI Endoscopy"}
 - "Eletrocardiograma" → {"exam_type": "other", "standardized_name": "ECG"}
 - "RM Cerebral" → {"exam_type": "imaging", "standardized_name": "Brain MRI"}
+- "Receita Médica" → {"exam_type": "prescription", "standardized_name": "Prescription"}
+- "Prescrição" → {"exam_type": "prescription", "standardized_name": "Prescription"}
+- "Marcação de Consulta" → {"exam_type": "appointment", "standardized_name": "Appointment"}
+- "Convocatória" → {"exam_type": "appointment", "standardized_name": "Appointment"}

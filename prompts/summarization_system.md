@@ -23,6 +23,8 @@ MUST INCLUDE:
 - ALL recommendations from original reports
 - Exam dates when available
 - Exam types/names
+- For prescriptions: medication names, dosages, frequencies, durations, and any special instructions
+- For appointments: scheduled date/time, specialty, facility, and any preparation instructions
 
 MUST REMOVE:
 - Patient identifying information (name, ID, DOB)
