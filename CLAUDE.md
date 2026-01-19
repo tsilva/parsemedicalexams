@@ -16,19 +16,19 @@ pip install -e .
 python main.py
 
 # Run with a specific profile
-python main.py --profile tsilva
+python main.py --profile tiago
 
 # List available profiles
 python main.py --list-profiles
 
 # Regenerate .md files from existing JSON extraction data
-python main.py --profile tsilva --regenerate
+python main.py --profile tiago --regenerate
 
 # Reprocess a specific document (by filename or stem)
-python main.py -p tsilva -d exam_2024.pdf
+python main.py -p tiago -d exam_2024.pdf
 
 # Reprocess a specific page within a document
-python main.py -p tsilva -d exam_2024.pdf --page 2
+python main.py -p tiago -d exam_2024.pdf --page 2
 ```
 
 ## Architecture
