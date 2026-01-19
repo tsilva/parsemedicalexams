@@ -630,6 +630,63 @@ def _parse_yaml_like_exam(text: str) -> Optional[dict]:
     return None
 
 
+def score_transcription_confidence(
+    merged_transcription: str,
+    original_transcriptions: list[str],
+    model_id: str,
+    client: OpenAI
+) -> float:
+    """
+    Use LLM to assess confidence by comparing merged transcription against originals.
+
+    Args:
+        merged_transcription: The final voted/merged transcription
+        original_transcriptions: List of original transcription attempts
+        model_id: Model to use for confidence scoring
+        client: OpenAI client instance
+
+    Returns:
+        Confidence score from 0.0 to 1.0
+    """
+    # If all originals are identical, confidence is 1.0
+    if all(t == original_transcriptions[0] for t in original_transcriptions):
+        return 1.0
+
+    system_prompt = load_prompt("confidence_scoring_system")
+
+    # Build comparison prompt
+    prompt_parts = [f"## Final Merged Transcription:\n{merged_transcription}\n"]
+    for i, orig in enumerate(original_transcriptions, 1):
+        prompt_parts.append(f"## Original Transcription {i}:\n{orig}\n")
+
+    user_prompt = "\n".join(prompt_parts)
+
+    try:
+        completion = client.chat.completions.create(
+            model=model_id,
+            temperature=0.1,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
+        )
+        response = completion.choices[0].message.content.strip()
+
+        # Parse JSON response
+        result = parse_llm_json_response(response, fallback=None)
+        if result and "confidence" in result:
+            confidence = float(result["confidence"])
+            # Clamp to valid range
+            return max(0.0, min(1.0, confidence))
+        else:
+            logger.warning(f"Could not parse confidence response: {response[:100]}")
+            return 0.5  # Default to neutral confidence
+
+    except Exception as e:
+        logger.error(f"Error during confidence scoring: {e}")
+        return 0.5  # Default to neutral confidence
+
+
 def _fix_date_formats(tool_result_dict: dict) -> dict:
     """Fix common date formatting issues and handle malformed exam entries."""
     # Fix date at report level

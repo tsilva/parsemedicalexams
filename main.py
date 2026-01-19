@@ -22,6 +22,7 @@ from extraction import (
     self_consistency,
     classify_document,
     transcribe_page,
+    score_transcription_confidence,
     DocumentClassification
 )
 from standardization import standardize_exam_types
@@ -263,11 +264,15 @@ def process_single_pdf(
                         config.extract_model_id,
                         client
                     )
-                    # Calculate agreement level for confidence
-                    agreement_count = sum(1 for t in all_transcriptions if t == transcription)
-                    confidence = agreement_count / len(all_transcriptions)
+                    # Use LLM to assess semantic agreement for confidence
+                    confidence = score_transcription_confidence(
+                        transcription,
+                        all_transcriptions,
+                        config.self_consistency_model_id,
+                        client
+                    )
                     if confidence < 1.0:
-                        logger.info(f"Self-consistency: {agreement_count}/{len(all_transcriptions)} agreement for {image_path.name}")
+                        logger.info(f"Self-consistency confidence: {confidence:.2f} for {image_path.name}")
                 else:
                     transcription = transcribe_page(
                         image_path,
