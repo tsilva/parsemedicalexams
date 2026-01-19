@@ -55,9 +55,8 @@ python main.py -p tiago -d exam_2024.pdf --page 2
 - `prompts/*.md`: All LLM prompts externalized as markdown files
 
 ### Output Format
-Each page produces two files:
-- **`{doc_stem}.{page}.md`**: Raw transcription verbatim
-- **`{doc_stem}.{page}.json`**: Metadata only (no transcription)
+Each page produces one file:
+- **`{doc_stem}.{page}.md`**: Raw transcription with YAML frontmatter (metadata embedded)
 
 Each document produces one summary file:
 - **`{doc_stem}.summary.md`**: Comprehensive clinical summary of all exams in the document (preserves all findings for medical records)

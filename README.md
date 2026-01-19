@@ -121,9 +121,8 @@ The parser generates structured markdown files with YAML frontmatter:
 ```
 output/
 ├── {document}/
-│   ├── {document}.1.md      # Page 1 transcription
-│   ├── {document}.1.json    # Page 1 metadata
-│   ├── {document}.2.md      # Page 2 transcription
+│   ├── {document}.1.md      # Page 1 transcription + metadata (YAML frontmatter)
+│   ├── {document}.2.md      # Page 2 transcription + metadata
 │   └── {document}.summary.md # Document-level summary
 ```
 
