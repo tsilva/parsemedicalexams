@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="logo.png" alt="medical-exams-parser" width="200"/>
+  <img src="logo.png" alt="medical-exams-parser" width="280"/>
 
   # medical-exams-parser
 
