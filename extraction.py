@@ -109,6 +109,14 @@ class DocumentClassification(BaseModel):
         default=None,
         description="Healthcare facility name (e.g., 'SYNLAB', 'Hospital Santo António')"
     )
+    physician_name: Optional[str] = Field(
+        default=None,
+        description="Name of the physician/doctor who performed or signed the exam"
+    )
+    department: Optional[str] = Field(
+        default=None,
+        description="Department or service within the facility (e.g., 'Radiologia', 'Cardiologia')"
+    )
 
 
 class PageTranscription(BaseModel):

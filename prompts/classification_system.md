@@ -28,3 +28,5 @@ Extract the following information:
 - exam_name_raw: The document title or exam name exactly as written (e.g., "CABELO: NUTRIENTES E METAIS TÓXICOS")
 - exam_date: Date in YYYY-MM-DD format (look for "Data", "Date", or date stamps)
 - facility_name: Healthcare facility name (e.g., "SYNLAB", "Hospital Santo António")
+- physician_name: Name of the physician/doctor who performed, interpreted, or signed the exam (look for signatures, "Dr.", "Dra.", "Médico:", "Realizado por:")
+- department: Department or service within the facility (e.g., "Serviço de Radiologia", "Cardiologia", "Gastroenterologia")

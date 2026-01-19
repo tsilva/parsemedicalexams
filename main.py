@@ -1,7 +1,6 @@
 """Main pipeline for medical exam extraction and summarization."""
 
 import argparse
-import json
 import re
 import shutil
 import sys
@@ -9,6 +8,8 @@ import logging
 import tempfile
 from collections import defaultdict
 from pathlib import Path
+
+import yaml
 
 from pdf2image import convert_from_path
 from openai import OpenAI
@@ -31,14 +32,15 @@ logger = logging.getLogger(__name__)
 
 
 def is_document_processed(pdf_path: Path, output_path: Path) -> bool:
-    """Check if a PDF has already been processed by looking for JSON extraction files."""
+    """Check if a PDF has already been processed by looking for transcription .md files."""
     doc_stem = pdf_path.stem
     doc_output_dir = output_path / doc_stem
-    # A document is considered processed if its output directory exists and has JSON files
+    # A document is considered processed if its output directory exists and has transcription .md files
     if not doc_output_dir.exists():
         return False
-    json_files = list(doc_output_dir.glob(f"{doc_stem}.*.json"))
-    return len(json_files) > 0
+    # Find .md files excluding .summary.md
+    md_files = [f for f in doc_output_dir.glob(f"{doc_stem}.*.md") if not f.name.endswith(".summary.md")]
+    return len(md_files) > 0
 
 
 def save_transcription_file(
@@ -48,52 +50,86 @@ def save_transcription_file(
     page_num: int
 ) -> None:
     """
-    Save page transcription as markdown file.
-    - .md = raw transcription verbatim
+    Save page transcription as markdown file with YAML frontmatter.
+    - .md = YAML frontmatter + raw transcription verbatim
+
+    Frontmatter includes all metadata (no separate JSON file needed).
     """
     md_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.md"
+
+    # Build frontmatter from first exam
+    frontmatter = {}
+    if exams:
+        exam = exams[0]
+        if exam.get("exam_date"):
+            frontmatter["date"] = exam["exam_date"]
+        if exam.get("exam_name_raw"):
+            frontmatter["exam_name_raw"] = exam["exam_name_raw"]
+        if exam.get("exam_name_standardized"):
+            frontmatter["title"] = exam["exam_name_standardized"]
+        if exam.get("exam_type"):
+            frontmatter["category"] = exam["exam_type"]
+        if exam.get("physician_name"):
+            frontmatter["doctor"] = exam["physician_name"]
+        if exam.get("facility_name"):
+            frontmatter["facility"] = exam["facility_name"]
+        if exam.get("department"):
+            frontmatter["department"] = exam["department"]
+        if exam.get("transcription_confidence") is not None:
+            frontmatter["confidence"] = exam["transcription_confidence"]
+        if exam.get("page_number"):
+            frontmatter["page"] = exam["page_number"]
+        if exam.get("source_file"):
+            frontmatter["source"] = exam["source_file"]
+
+    # Write file
     transcriptions = [exam.get("transcription", "") for exam in exams]
     with open(md_path, 'w', encoding='utf-8') as f:
+        if frontmatter:
+            f.write("---\n")
+            f.write(yaml.dump(frontmatter, default_flow_style=False, allow_unicode=True, sort_keys=False))
+            f.write("---\n\n")
         f.write("\n\n".join(transcriptions).strip() + "\n")
 
 
 def save_document_summary(
     summary: str,
     doc_output_dir: Path,
-    doc_stem: str
+    doc_stem: str,
+    exams: list[dict] = None
 ) -> None:
     """
-    Save document-level summary as markdown file.
-    - .summary.md = comprehensive clinical summary for the entire document
+    Save document-level summary as markdown file with YAML frontmatter.
+    - .summary.md = YAML frontmatter + comprehensive clinical summary for the entire document
     """
     if summary:
         summary_path = doc_output_dir / f"{doc_stem}.summary.md"
+
+        # Build frontmatter from first exam
+        frontmatter = {}
+        if exams:
+            exam = exams[0]
+            if exam.get("exam_date"):
+                frontmatter["date"] = exam["exam_date"]
+            if exam.get("exam_name_raw"):
+                frontmatter["exam_name_raw"] = exam["exam_name_raw"]
+            if exam.get("exam_name_standardized"):
+                frontmatter["title"] = exam["exam_name_standardized"]
+            if exam.get("exam_type"):
+                frontmatter["category"] = exam["exam_type"]
+            if exam.get("physician_name"):
+                frontmatter["doctor"] = exam["physician_name"]
+            if exam.get("facility_name"):
+                frontmatter["facility"] = exam["facility_name"]
+            if exam.get("department"):
+                frontmatter["department"] = exam["department"]
+
         with open(summary_path, 'w', encoding='utf-8') as f:
+            if frontmatter:
+                f.write("---\n")
+                f.write(yaml.dump(frontmatter, default_flow_style=False, allow_unicode=True, sort_keys=False))
+                f.write("---\n\n")
             f.write(summary.strip() + "\n")
-
-
-def save_metadata_json(
-    exams: list[dict],
-    doc_output_dir: Path,
-    doc_stem: str,
-    page_num: int
-) -> Path:
-    """
-    Save exam metadata as JSON (no transcription - that goes in .md file).
-    """
-    json_filename = f"{doc_stem}.{page_num:03d}.json"
-    json_path = doc_output_dir / json_filename
-
-    # Strip transcription and summary from metadata (they have their own .md files)
-    metadata_exams = []
-    for exam in exams:
-        meta = {k: v for k, v in exam.items() if k not in ("transcription", "summary")}
-        metadata_exams.append(meta)
-
-    with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump({"exams": metadata_exams}, f, ensure_ascii=False, indent=2)
-
-    return json_path
 
 
 def extract_date_from_filename(filename: str) -> str | None:
@@ -252,28 +288,15 @@ def process_single_pdf(
                 "transcription": transcription,
                 "page_number": page_num,
                 "source_file": pdf_path.name,
-                "transcription_confidence": confidence
+                "transcription_confidence": confidence,
+                "physician_name": classification.physician_name,
+                "department": classification.department,
+                "facility_name": facility_name
             }
             all_exams.append(exam)
 
-            # Save transcription file
+            # Save transcription file (will be resaved with standardized info later)
             save_transcription_file([exam], doc_output_dir, doc_stem, page_num)
-
-            # Save metadata JSON (without transcription)
-            json_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.json"
-            metadata = {
-                "exams": [{
-                    "exam_date": exam_date,
-                    "exam_name_raw": exam_name,
-                    "exam_type": None,
-                    "exam_name_standardized": None,
-                    "page_number": page_num,
-                    "source_file": pdf_path.name,
-                    "transcription_confidence": confidence
-                }]
-            }
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(metadata, f, ensure_ascii=False, indent=2)
 
     # Standardize exam types
     if all_exams:
@@ -287,37 +310,79 @@ def process_single_pdf(
                 exam["exam_type"] = exam_type
                 exam["exam_name_standardized"] = std_name
 
-        # Update JSON files with standardized info
+        # Resave transcription files with YAML frontmatter (now includes standardized info)
         for exam in all_exams:
             page_num = exam.get("page_number", 1)
-            json_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.json"
-            metadata = {
-                "exams": [{
-                    "exam_date": exam.get("exam_date"),
-                    "exam_name_raw": exam.get("exam_name_raw"),
-                    "exam_type": exam.get("exam_type"),
-                    "exam_name_standardized": exam.get("exam_name_standardized"),
-                    "page_number": page_num,
-                    "source_file": pdf_path.name,
-                    "transcription_confidence": exam.get("transcription_confidence")
-                }]
-            }
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(metadata, f, ensure_ascii=False, indent=2)
+            save_transcription_file([exam], doc_output_dir, doc_stem, page_num)
 
         # Generate document-level summary
         document_summary = summarize_document(all_exams, config.summarize_model_id, client)
-        save_document_summary(document_summary, doc_output_dir, doc_stem)
+        save_document_summary(document_summary, doc_output_dir, doc_stem, all_exams)
 
     logger.info(f"Processed {len(all_exams)} pages for: {pdf_path.name}")
     return len(all_exams)
 
 
+def parse_frontmatter(content: str) -> tuple[dict, str]:
+    """
+    Parse YAML frontmatter from markdown content.
+
+    Returns:
+        Tuple of (frontmatter_dict, transcription_content)
+    """
+    frontmatter = {}
+    transcription = content.strip()
+
+    if transcription.startswith("---"):
+        # Find the end of frontmatter
+        end_marker = transcription.find("---", 3)
+        if end_marker != -1:
+            frontmatter_str = transcription[3:end_marker].strip()
+            try:
+                frontmatter = yaml.safe_load(frontmatter_str) or {}
+            except yaml.YAMLError:
+                pass
+            transcription = transcription[end_marker + 3:].strip()
+
+    return frontmatter, transcription
+
+
+def frontmatter_to_exam(frontmatter: dict, transcription: str, page_num: int, source_file: str = None) -> dict:
+    """
+    Convert frontmatter fields to internal exam dict format.
+
+    Frontmatter fields -> Internal fields:
+    - date -> exam_date
+    - exam_name_raw -> exam_name_raw
+    - title -> exam_name_standardized
+    - category -> exam_type
+    - doctor -> physician_name
+    - facility -> facility_name
+    - department -> department
+    - confidence -> transcription_confidence
+    - page -> page_number
+    - source -> source_file
+    """
+    return {
+        "exam_date": frontmatter.get("date"),
+        "exam_name_raw": frontmatter.get("exam_name_raw"),
+        "exam_name_standardized": frontmatter.get("title"),
+        "exam_type": frontmatter.get("category"),
+        "physician_name": frontmatter.get("doctor"),
+        "facility_name": frontmatter.get("facility"),
+        "department": frontmatter.get("department"),
+        "transcription_confidence": frontmatter.get("confidence"),
+        "transcription": transcription,
+        "page_number": frontmatter.get("page") or page_num,
+        "source_file": frontmatter.get("source") or source_file
+    }
+
+
 def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: OpenAI, input_path: Path | None = None):
     """
-    Regenerate document-level summary files from existing transcription (.md) and metadata (.json) files.
+    Regenerate document-level summary files from existing transcription (.md) files.
 
-    Reads transcription from .md files and metadata from .json files,
+    Reads metadata from YAML frontmatter and transcription content from .md files,
     re-runs document-level summarization, and saves updated .summary.md files.
     If input_path is provided, also copies source PDFs to output directories if missing.
     """
@@ -343,17 +408,20 @@ def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: Op
                     except PermissionError:
                         logger.warning(f"Could not copy PDF (permission denied): {source_pdfs[0].name}")
 
-        # Find all JSON metadata files (exclude .summary.md pattern)
-        json_files = sorted([f for f in doc_dir.glob(f"{doc_stem}.*.json")])
-        if not json_files:
-            logger.warning(f"No JSON files found in {doc_dir}")
+        # Find all transcription .md files (exclude .summary.md)
+        md_files = sorted([
+            f for f in doc_dir.glob(f"{doc_stem}.*.md")
+            if not f.name.endswith(".summary.md")
+        ])
+        if not md_files:
+            logger.warning(f"No transcription files found in {doc_dir}")
             continue
 
         all_exams = []
 
-        for json_path in json_files:
-            # Extract page number from filename
-            parts = json_path.stem.split(".")
+        for md_path in md_files:
+            # Extract page number from filename (e.g., "doc.001.md" -> 1)
+            parts = md_path.stem.split(".")
             if len(parts) >= 2:
                 try:
                     page_num = int(parts[-1])
@@ -362,30 +430,21 @@ def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: Op
             else:
                 continue
 
-            # Read metadata from JSON
-            with open(json_path, 'r', encoding='utf-8') as f:
-                metadata = json.load(f)
-
-            # Read transcription from corresponding .md file
-            md_path = doc_dir / f"{doc_stem}.{page_num:03d}.md"
-            if not md_path.exists():
-                logger.warning(f"No transcription file found: {md_path}")
-                continue
-
+            # Read and parse the markdown file
             with open(md_path, 'r', encoding='utf-8') as f:
-                transcription = f.read().strip()
+                content = f.read()
 
-            # Combine metadata with transcription
-            for exam in metadata.get("exams", []):
-                exam["transcription"] = transcription
-                exam["page_number"] = page_num
-                all_exams.append(exam)
+            frontmatter, transcription = parse_frontmatter(content)
+
+            # Convert frontmatter to exam dict (use doc_stem.pdf as fallback source)
+            exam = frontmatter_to_exam(frontmatter, transcription, page_num, f"{doc_stem}.pdf")
+            all_exams.append(exam)
 
         if not all_exams:
             logger.warning(f"No exams found in {doc_dir}")
             continue
 
-        # Delete existing .summary.md files (both old page-level and document-level)
+        # Delete existing .summary.md files
         for old_summary in doc_dir.glob("*.summary.md"):
             old_summary.unlink()
 
@@ -393,7 +452,7 @@ def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: Op
         document_summary = summarize_document(all_exams, config.summarize_model_id, client)
 
         # Save one summary for the entire document
-        save_document_summary(document_summary, doc_dir, doc_stem)
+        save_document_summary(document_summary, doc_dir, doc_stem, all_exams)
 
         logger.info(f"Regenerated summary for {len(all_exams)} exams: {doc_stem}")
         total_exams += len(all_exams)
@@ -441,12 +500,7 @@ def validate_pipeline_outputs(
             if not img_path.exists():
                 missing.append(f"Missing page image: {img_path}")
 
-            # Metadata
-            json_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.json"
-            if not json_path.exists():
-                missing.append(f"Missing page metadata: {json_path}")
-
-            # Transcription
+            # Transcription (with frontmatter containing all metadata)
             md_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.md"
             if not md_path.exists():
                 missing.append(f"Missing page transcription: {md_path}")
@@ -457,6 +511,62 @@ def validate_pipeline_outputs(
             missing.append(f"Missing document summary: {summary_path}")
 
     return missing
+
+
+def validate_frontmatter(output_path: Path) -> list[str]:
+    """
+    Validate that all .md files have YAML frontmatter with required fields.
+
+    Returns list of files missing frontmatter or required fields.
+    """
+    issues = []
+    required_fields = {"date", "category", "title"}  # Minimum required fields
+
+    # Find all document directories
+    doc_dirs = [d for d in output_path.iterdir() if d.is_dir() and d.name != "logs"]
+
+    for doc_dir in doc_dirs:
+        doc_stem = doc_dir.name
+
+        # Check all .md files (both transcription and summary)
+        md_files = list(doc_dir.glob(f"{doc_stem}.*.md"))
+
+        for md_path in md_files:
+            try:
+                with open(md_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+
+                # Check for frontmatter
+                if not content.startswith("---"):
+                    issues.append(f"Missing frontmatter: {md_path.name}")
+                    continue
+
+                # Parse frontmatter
+                end_marker = content.find("---", 3)
+                if end_marker == -1:
+                    issues.append(f"Malformed frontmatter: {md_path.name}")
+                    continue
+
+                frontmatter_str = content[3:end_marker].strip()
+                try:
+                    frontmatter = yaml.safe_load(frontmatter_str)
+                except yaml.YAMLError:
+                    issues.append(f"Invalid YAML frontmatter: {md_path.name}")
+                    continue
+
+                if not frontmatter:
+                    issues.append(f"Empty frontmatter: {md_path.name}")
+                    continue
+
+                # Check for required fields
+                missing_fields = required_fields - set(frontmatter.keys())
+                if missing_fields:
+                    issues.append(f"Missing fields {missing_fields}: {md_path.name}")
+
+            except Exception as e:
+                issues.append(f"Error reading {md_path.name}: {e}")
+
+    return issues
 
 
 def parse_args():
@@ -619,6 +729,20 @@ def run_profile(profile_name: str, args) -> bool:
         logger.info("Regeneration Complete")
         logger.info("=" * 60)
         logger.info(f"Regenerated summaries for {total_exams} exams")
+
+        # Validate frontmatter
+        logger.info("Validating frontmatter...")
+        frontmatter_issues = validate_frontmatter(config.output_path)
+        if frontmatter_issues:
+            logger.warning("=" * 60)
+            logger.warning("Frontmatter issues detected:")
+            logger.warning("=" * 60)
+            for issue in frontmatter_issues:
+                logger.warning(f"  {issue}")
+            logger.warning(f"Total issues: {len(frontmatter_issues)}")
+        else:
+            logger.info("All frontmatter validated successfully")
+
         return True
 
     # Find PDF files
@@ -722,6 +846,19 @@ def run_profile(profile_name: str, args) -> bool:
         logger.warning(f"Total missing: {len(missing_outputs)}")
     else:
         logger.info("All outputs validated successfully")
+
+    # Validate frontmatter
+    logger.info("Validating frontmatter...")
+    frontmatter_issues = validate_frontmatter(config.output_path)
+    if frontmatter_issues:
+        logger.warning("=" * 60)
+        logger.warning("Frontmatter issues detected:")
+        logger.warning("=" * 60)
+        for issue in frontmatter_issues:
+            logger.warning(f"  {issue}")
+        logger.warning(f"Total issues: {len(frontmatter_issues)}")
+    else:
+        logger.info("All frontmatter validated successfully")
 
     return True
 

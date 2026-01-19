@@ -5,5 +5,7 @@ Look at ALL pages and determine:
 2. What is the document/exam name?
 3. What is the exam date?
 4. What is the facility name?
+5. Who is the physician/doctor? (Look for signatures, stamps, or "Dr./Dra." mentions)
+6. What department or service is this from? (Look for department headers, service names)
 
 If ANY page contains medical exam content, the entire document should be classified as an exam.
