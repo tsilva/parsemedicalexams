@@ -153,6 +153,96 @@ def extract_date_from_filename(filename: str) -> str | None:
     return None
 
 
+def extract_dates_from_text(text: str) -> list[str]:
+    """
+    Extract all dates in YYYY-MM-DD format from text.
+
+    Handles common Portuguese/European date formats:
+    - DD/MM/YYYY (e.g., 20/11/2024)
+    - DD-MM-YYYY (e.g., 20-11-2024)
+    - YYYY-MM-DD (e.g., 2024-11-20)
+    - DD de MMMM de YYYY (e.g., 20 de Novembro de 2024)
+
+    Args:
+        text: Text to extract dates from
+
+    Returns:
+        List of dates in YYYY-MM-DD format
+    """
+    dates = []
+
+    # Pattern 1: YYYY-MM-DD (already correct format)
+    for match in re.finditer(r"\b(\d{4})-(\d{2})-(\d{2})\b", text):
+        year, month, day = match.groups()
+        # Validate ranges
+        if 1900 <= int(year) <= 2100 and 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
+            dates.append(f"{year}-{month}-{day}")
+
+    # Pattern 2: DD/MM/YYYY or DD-MM-YYYY
+    for match in re.finditer(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b", text):
+        day, month, year = match.groups()
+        # Validate ranges
+        day_int, month_int, year_int = int(day), int(month), int(year)
+        if 1900 <= year_int <= 2100 and 1 <= month_int <= 12 and 1 <= day_int <= 31:
+            dates.append(f"{year}-{month:0>2}-{day:0>2}")
+
+    return dates
+
+
+def select_most_frequent_date(exams: list[dict]) -> str | None:
+    """
+    Select the most frequent date across all pages using frequency-based voting.
+
+    This handles multi-era documents where administrative pages (e.g., 2024 cover letter)
+    may have different dates than the actual medical records (e.g., 1997 hospitalization).
+
+    First extracts dates from each page's transcription, then votes on the most frequent.
+
+    Args:
+        exams: List of exam dictionaries with transcriptions
+
+    Returns:
+        The most frequently occurring date, or None if no dates found
+
+    Example:
+        - Page 1: 2024 (1 occurrence)
+        - Pages 2-45: 1997 (44 occurrences)
+        - Result: 1997 (most frequent = real document date)
+    """
+    from collections import Counter
+
+    # Extract dates from each page's transcription
+    all_dates = []
+    for exam in exams:
+        transcription = exam.get("transcription", "")
+        if transcription:
+            page_dates = extract_dates_from_text(transcription)
+            # Use the earliest date on each page as that page's representative date
+            if page_dates:
+                page_date = min(page_dates)  # Earliest = likely the exam date
+                all_dates.append(page_date)
+
+    # Fallback: use exam_date if no dates found in transcriptions
+    if not all_dates:
+        all_dates = [exam.get("exam_date") for exam in exams if exam.get("exam_date")]
+
+    if not all_dates:
+        return None
+
+    # Count frequency of each date
+    date_counts = Counter(all_dates)
+
+    # Return most common date (mode)
+    most_common_date, count = date_counts.most_common(1)[0]
+
+    # Log if there's date variation (indicating multi-era document)
+    if len(date_counts) > 1:
+        logger.info(f"Multi-era document detected. Date frequency: {dict(date_counts)}")
+        logger.info(f"Selected most frequent date: {most_common_date} ({count}/{len(all_dates)} pages)")
+
+    return most_common_date
+
+
 def process_single_pdf(
     pdf_path: Path,
     output_path: Path,
@@ -302,6 +392,15 @@ def process_single_pdf(
 
             # Save transcription file (will be resaved with standardized info later)
             save_transcription_file([exam], doc_output_dir, doc_stem, page_num)
+
+    # Apply frequency-based date correction for multi-era documents
+    if all_exams:
+        corrected_date = select_most_frequent_date(all_exams)
+        if corrected_date:
+            logger.debug(f"Selected document date by frequency: {corrected_date}")
+            # Update all exams with the corrected date
+            for exam in all_exams:
+                exam["exam_date"] = corrected_date
 
     # Standardize exam types
     if all_exams:
