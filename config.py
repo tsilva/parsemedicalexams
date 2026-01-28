@@ -88,6 +88,7 @@ class ExtractionConfig:
     n_extractions: int
     openrouter_api_key: str
     openrouter_base_url: str
+    validation_model_id: str
     max_workers: int
 
     @classmethod
@@ -105,6 +106,7 @@ class ExtractionConfig:
         summarize_model_id = os.getenv("SUMMARIZE_MODEL_ID")
         n_extractions = int(os.getenv("N_EXTRACTIONS", 1))
         openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+        validation_model_id = os.getenv("VALIDATION_MODEL_ID", "anthropic/claude-haiku-4.5")
         max_workers_str = os.getenv("MAX_WORKERS", "1")
 
         # Load base URL with fallback to OpenRouter
@@ -141,5 +143,6 @@ class ExtractionConfig:
             n_extractions=n_extractions,
             openrouter_api_key=openrouter_api_key,
             openrouter_base_url=openrouter_base_url,
+            validation_model_id=validation_model_id,
             max_workers=max_workers,
         )

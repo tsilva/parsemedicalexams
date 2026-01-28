@@ -497,6 +497,34 @@ def transcribe_page(
     return content
 
 
+def _load_refusal_phrases() -> list[str]:
+    """Load refusal phrases from prompts/refusal_phrases.txt."""
+    phrases_path = Path(__file__).parent / "prompts" / "refusal_phrases.txt"
+    if not phrases_path.exists():
+        logger.warning(f"Refusal phrases file not found: {phrases_path}")
+        return []
+    return [line.strip() for line in phrases_path.read_text().splitlines() if line.strip()]
+
+
+def validate_transcription(
+    transcription: str,
+    model_id: str,
+    client: OpenAI
+) -> tuple[bool, str]:
+    """Returns (is_valid, reason). Quick heuristic check for transcription quality."""
+    # Empty or too short
+    if not transcription or len(transcription.strip()) < 20:
+        return (False, "empty")
+
+    # Refusal phrases
+    lower = transcription.strip().lower()
+    for phrase in _load_refusal_phrases():
+        if phrase in lower:
+            return (False, "refusal")
+
+    return (True, "ok")
+
+
 def _normalize_date_format(date_str: Optional[str]) -> Optional[str]:
     """
     Normalize date strings to YYYY-MM-DD format.

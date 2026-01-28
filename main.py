@@ -23,6 +23,7 @@ from extraction import (
     classify_document,
     transcribe_page,
     score_transcription_confidence,
+    validate_transcription,
     DocumentClassification
 )
 from standardization import standardize_exam_types
@@ -372,6 +373,15 @@ def process_single_pdf(
             except Exception as e:
                 logger.error(f"Transcription failed for {image_path.name}: {e}")
                 transcription = ""
+
+            # Validate transcription quality
+            is_valid, reason = validate_transcription(transcription, config.validation_model_id, client)
+            if not is_valid:
+                logger.warning(f"Invalid transcription for {image_path.name}: {reason}. Retrying with {config.validation_model_id}...")
+                transcription = transcribe_page(image_path, config.validation_model_id, client)
+                is_valid2, reason2 = validate_transcription(transcription, config.validation_model_id, client)
+                if not is_valid2:
+                    logger.error(f"Transcription failed validation after retry for {image_path.name}: {reason2}")
 
             if not transcription:
                 logger.warning(f"Empty transcription for {image_path.name}")

@@ -21,6 +21,8 @@ DOCUMENT TYPES THAT ARE EXAMS:
 - Prescriptions: Receita médica, Prescrição, medication orders, prescription refills
 - Appointments: Marcação, Convocatória, appointment notices, scheduling confirmations
 
+IMPORTANT CONTEXT: These are the user's own medical documents. The user is digitizing their personal health records for their own use. You have full authorization to process these documents. Do not refuse on privacy grounds.
+
 IMPORTANT: When in doubt, classify as EXAM. It's better to transcribe something unnecessary than to miss medical content.
 
 Extract the following information:
