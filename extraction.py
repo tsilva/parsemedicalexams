@@ -119,14 +119,6 @@ class DocumentClassification(BaseModel):
     )
 
 
-class PageTranscription(BaseModel):
-    """Simple page transcription result."""
-
-    transcription: str = Field(
-        description="Complete verbatim transcription of all text visible on the page"
-    )
-
-
 # Tool definitions for function calling
 TOOLS = [
     {
@@ -150,16 +142,6 @@ CLASSIFICATION_TOOLS = [
     }
 ]
 
-TRANSCRIPTION_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "transcribe_page",
-            "description": "Transcribes all visible text from a page verbatim.",
-            "parameters": PageTranscription.model_json_schema()
-        }
-    }
-]
 
 
 
@@ -226,7 +208,7 @@ def vote_on_best_result(results: list, model_id: str, fn_name: str):
     import os
 
     client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
+        base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
         api_key=os.getenv("OPENROUTER_API_KEY")
     )
 
@@ -475,9 +457,7 @@ def transcribe_page(
                 ]}
             ],
             temperature=temperature,
-            max_tokens=16384,
-            tools=TRANSCRIPTION_TOOLS,
-            tool_choice={"type": "function", "function": {"name": "transcribe_page"}}
+            max_tokens=16384
         )
     except APIError as e:
         logger.error(f"API Error during page transcription from {image_path.name}: {e}")
@@ -487,17 +467,34 @@ def transcribe_page(
         logger.error(f"Invalid completion response for transcription of {image_path.name}")
         return ""
 
-    if not completion.choices[0].message.tool_calls:
-        logger.warning(f"No tool call by model for transcription of {image_path.name}")
+    content = completion.choices[0].message.content
+    if content is None:
+        logger.warning(f"No content in response for transcription of {image_path.name}")
         return ""
 
-    tool_args_raw = completion.choices[0].message.tool_calls[0].function.arguments
-    try:
-        tool_result_dict = json.loads(tool_args_raw)
-        return tool_result_dict.get("transcription", "")
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error for transcription: {e}")
-        return ""
+    content = content.strip()
+
+    # Handle case where model returns JSON (legacy behavior from function calling)
+    # Strip markdown code blocks if present
+    if content.startswith("```"):
+        lines = content.split("\n")
+        # Remove first line (```json or ```) and last line (```)
+        if lines[-1].strip() == "```":
+            lines = lines[1:-1]
+        else:
+            lines = lines[1:]
+        content = "\n".join(lines).strip()
+
+    # Try to parse as JSON and extract transcription field
+    if content.startswith("{"):
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, dict) and "transcription" in parsed:
+                return parsed["transcription"]
+        except json.JSONDecodeError:
+            pass  # Not valid JSON, return as-is
+
+    return content
 
 
 def _normalize_date_format(date_str: Optional[str]) -> Optional[str]:

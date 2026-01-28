@@ -1,5 +1,7 @@
 # Environment
 .env
+.env.*
+!.env.local.example
 .venv/
 venv/
 env/
@@ -49,3 +51,5 @@ profiles/*.yml
 profiles/*.json
 !profiles/_template.yaml
 !profiles/_template.json
+
+.claude-sandbox.json

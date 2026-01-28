@@ -26,7 +26,7 @@ IMPORTANT: When in doubt, classify as EXAM. It's better to transcribe something 
 Extract the following information:
 - is_exam: true/false
 - exam_name_raw: The document title or exam name exactly as written (e.g., "CABELO: NUTRIENTES E METAIS TÓXICOS")
-- exam_date: Date in YYYY-MM-DD format (look for "Data", "Date", or date stamps)
+- exam_date: The date the exam was performed or report was issued (YYYY-MM-DD)
 - facility_name: Healthcare facility name (e.g., "SYNLAB", "Hospital Santo António")
 - physician_name: Name of the physician/doctor who performed, interpreted, or signed the exam (look for signatures, "Dr.", "Dra.", "Médico:", "Realizado por:")
 - department: Department or service within the facility (e.g., "Serviço de Radiologia", "Cardiologia", "Gastroenterologia")

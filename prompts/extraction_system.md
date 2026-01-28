@@ -20,7 +20,7 @@ VERBATIM TRANSCRIPTION RULES:
 
 EXAM IDENTIFICATION:
 - Extract exam_name_raw exactly as written in the document
-- Extract exam_date in YYYY-MM-DD format (look for date, data, or similar)
+- Extract exam_date in YYYY-MM-DD format (the date the exam was performed or report was issued)
 - If multiple exams exist in one document, extract each separately
 
 DOCUMENT TYPES TO RECOGNIZE:

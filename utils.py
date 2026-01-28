@@ -5,10 +5,12 @@ import unicodedata
 import re
 import shutil
 import logging
+import sys
 from pathlib import Path
 from typing import Any
 from PIL import Image, ImageEnhance
 import pandas as pd
+from dotenv import load_dotenv
 
 # Prompts directory
 PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -82,6 +84,41 @@ def ensure_columns(df: pd.DataFrame, columns: list[str], default: Any = None) ->
         if col not in df.columns:
             df[col] = default
     return df
+
+
+def load_dotenv_with_env() -> str | None:
+    """
+    Load environment variables with optional --env overlay.
+
+    Parses --env flag from sys.argv before full argument parsing,
+    loads base .env first, then overlays .env.{name} if specified.
+
+    Returns:
+        The env name if --env was specified, None otherwise.
+    """
+    # Parse --env flag early (before argparse)
+    env_name = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--env" and i + 1 < len(sys.argv):
+            env_name = sys.argv[i + 1]
+            break
+        elif arg.startswith("--env="):
+            env_name = arg.split("=", 1)[1]
+            break
+
+    # Load environment file (standalone behavior)
+    if env_name:
+        # Only load .env.{name} when specified
+        env_path = Path(f".env.{env_name}")
+        if env_path.exists():
+            load_dotenv(env_path)
+        else:
+            print(f"Warning: Environment file not found: {env_path}")
+    else:
+        # Load base .env when no env specified
+        load_dotenv()
+
+    return env_name
 
 
 def setup_logging(log_dir: Path, clear_logs: bool = False) -> logging.Logger:

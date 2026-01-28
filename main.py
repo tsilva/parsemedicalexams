@@ -7,13 +7,13 @@ import sys
 import logging
 import tempfile
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import yaml
 
 from pdf2image import convert_from_path
 from openai import OpenAI
-from dotenv import load_dotenv
 from tqdm import tqdm
 
 from config import ExtractionConfig, ProfileConfig
@@ -27,7 +27,7 @@ from extraction import (
 )
 from standardization import standardize_exam_types
 from summarization import summarize_document
-from utils import preprocess_page_image, setup_logging
+from utils import preprocess_page_image, setup_logging, load_dotenv_with_env
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ def save_transcription_file(
     if exams:
         exam = exams[0]
         if exam.get("exam_date"):
-            frontmatter["date"] = exam["exam_date"]
+            frontmatter["exam_date"] = exam["exam_date"]
         if exam.get("exam_name_raw"):
             frontmatter["exam_name_raw"] = exam["exam_name_raw"]
         if exam.get("exam_name_standardized"):
@@ -111,7 +111,7 @@ def save_document_summary(
         if exams:
             exam = exams[0]
             if exam.get("exam_date"):
-                frontmatter["date"] = exam["exam_date"]
+                frontmatter["exam_date"] = exam["exam_date"]
             if exam.get("exam_name_raw"):
                 frontmatter["exam_name_raw"] = exam["exam_name_raw"]
             if exam.get("exam_name_standardized"):
@@ -335,12 +335,12 @@ def process_single_pdf(
         if not exam_date:
             exam_date = extract_date_from_filename(pdf_path.name)
 
-        # Transcribe all pages
-        all_exams = []
-        for page_num, image_path in enumerate(image_paths, start=1):
+        # Define page processing function for parallel execution
+        def process_page(page_num: int, image_path: Path) -> dict | None:
+            """Process a single page - returns exam dict or None if skipped."""
             # Skip pages if filter is active
             if page_filter is not None and page_num != page_filter:
-                continue
+                return None
 
             # Transcribe page (with optional self-consistency voting)
             confidence = None
@@ -377,7 +377,7 @@ def process_single_pdf(
                 logger.warning(f"Empty transcription for {image_path.name}")
 
             # Create exam entry for this page
-            exam = {
+            return {
                 "exam_name_raw": exam_name,
                 "exam_date": exam_date,
                 "transcription": transcription,
@@ -388,10 +388,27 @@ def process_single_pdf(
                 "department": classification.department,
                 "facility_name": facility_name
             }
-            all_exams.append(exam)
 
-            # Save transcription file (will be resaved with standardized info later)
-            save_transcription_file([exam], doc_output_dir, doc_stem, page_num)
+        # Process pages in parallel
+        all_exams = []
+        with ThreadPoolExecutor(max_workers=config.max_workers) as executor:
+            futures = {
+                executor.submit(process_page, page_num, image_path): page_num
+                for page_num, image_path in enumerate(image_paths, start=1)
+            }
+            for future in as_completed(futures):
+                page_num = futures[future]
+                try:
+                    exam = future.result()
+                    if exam is not None:
+                        all_exams.append(exam)
+                        # Save transcription file immediately
+                        save_transcription_file([exam], doc_output_dir, doc_stem, page_num)
+                except Exception as e:
+                    logger.error(f"Page {page_num} processing failed: {e}")
+
+        # Sort by page number for consistent ordering
+        all_exams.sort(key=lambda x: x["page_number"])
 
     # Apply frequency-based date correction for multi-era documents
     if all_exams:
@@ -468,7 +485,7 @@ def frontmatter_to_exam(frontmatter: dict, transcription: str, page_num: int, so
     - source -> source_file
     """
     return {
-        "exam_date": frontmatter.get("date"),
+        "exam_date": frontmatter.get("exam_date"),
         "exam_name_raw": frontmatter.get("exam_name_raw"),
         "exam_name_standardized": frontmatter.get("title"),
         "exam_type": frontmatter.get("category"),
@@ -624,7 +641,7 @@ def validate_frontmatter(output_path: Path) -> list[str]:
     Returns list of files missing frontmatter or required fields.
     """
     issues = []
-    required_fields = {"date", "category", "title"}  # Minimum required fields
+    required_fields = {"exam_date", "category", "title"}  # Minimum required fields
 
     # Find all document directories
     doc_dirs = [d for d in output_path.iterdir() if d.is_dir() and d.name != "logs"]
@@ -735,6 +752,11 @@ Examples:
         type=str,
         help="Regex pattern for input files (overrides profile)"
     )
+    parser.add_argument(
+        "--env",
+        type=str,
+        help="Environment name to load (loads .env.{name} instead of .env)"
+    )
     return parser.parse_args()
 
 
@@ -818,10 +840,11 @@ def run_profile(profile_name: str, args) -> bool:
     logger.info(f"Extract model: {config.extract_model_id}")
     logger.info(f"Summarize model: {config.summarize_model_id}")
     logger.info(f"N extractions: {config.n_extractions}")
+    logger.info(f"API base URL: {config.openrouter_base_url}")
 
     # Initialize OpenAI client
     client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
+        base_url=config.openrouter_base_url,
         api_key=config.openrouter_api_key
     )
 
@@ -969,8 +992,11 @@ def run_profile(profile_name: str, args) -> bool:
 
 def main():
     """Main pipeline entry point."""
-    load_dotenv()
+    env_name = load_dotenv_with_env()
     args = parse_args()
+
+    if env_name:
+        print(f"Using environment: {env_name} (.env.{env_name})")
 
     # Handle --list-profiles
     if args.list_profiles:

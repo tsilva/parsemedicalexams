@@ -7,7 +7,7 @@ CRITICAL:
 - Mark unclear text as [illegible]
 
 For EACH document/page, you MUST provide:
-1. exam_date - Date in YYYY-MM-DD format (look for any date on the document)
+1. exam_date - The date the exam was performed or report was issued (YYYY-MM-DD)
 2. exam_name_raw - Document type/title (e.g., "Radiografia do Tórax", "Nota de Alta", "Carta de Envio de Registos Clínicos")
 3. transcription - COMPLETE verbatim text preserving original layout
 

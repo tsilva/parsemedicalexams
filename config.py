@@ -87,6 +87,7 @@ class ExtractionConfig:
     summarize_model_id: str
     n_extractions: int
     openrouter_api_key: str
+    openrouter_base_url: str
     max_workers: int
 
     @classmethod
@@ -105,6 +106,9 @@ class ExtractionConfig:
         n_extractions = int(os.getenv("N_EXTRACTIONS", 1))
         openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
         max_workers_str = os.getenv("MAX_WORKERS", "1")
+
+        # Load base URL with fallback to OpenRouter
+        openrouter_base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
         # Validate required fields (paths can be provided by profile)
         if not self_consistency_model_id:
@@ -136,5 +140,6 @@ class ExtractionConfig:
             summarize_model_id=summarize_model_id,
             n_extractions=n_extractions,
             openrouter_api_key=openrouter_api_key,
+            openrouter_base_url=openrouter_base_url,
             max_workers=max_workers,
         )
