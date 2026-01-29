@@ -27,11 +27,13 @@ def load_prompt(name: str) -> str:
 def preprocess_page_image(image: Image.Image) -> Image.Image:
     """Convert image to grayscale, resize, and enhance contrast."""
     gray_image = image.convert('L')
-    MAX_WIDTH = 1200
-    if gray_image.width > MAX_WIDTH:
-        ratio = MAX_WIDTH / gray_image.width
+    MAX_LONG_SIDE = 1000
+    long_side = max(gray_image.width, gray_image.height)
+    if long_side > MAX_LONG_SIDE:
+        ratio = MAX_LONG_SIDE / long_side
+        new_width = int(gray_image.width * ratio)
         new_height = int(gray_image.height * ratio)
-        gray_image = gray_image.resize((MAX_WIDTH, new_height), Image.Resampling.LANCZOS)
+        gray_image = gray_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
     return ImageEnhance.Contrast(gray_image).enhance(2.0)
 
 
@@ -117,6 +119,11 @@ def load_dotenv_with_env() -> str | None:
     else:
         # Load base .env when no env specified
         load_dotenv()
+
+    # Always overlay .env.local if it exists (local overrides, standard convention)
+    local_env_path = Path(".env.local")
+    if local_env_path.exists():
+        load_dotenv(local_env_path, override=True)
 
     return env_name
 

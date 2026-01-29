@@ -1,5 +1,9 @@
 # Profile Template - Copy this file and rename to {your_name}.yaml
-name: "Your Name"
+full_name: "Your Full Name"
+birth_date: "YYYY-MM-DD"
+gender: "your gender"
+nationality: "your nationality"
+locale: "your locale"
 
 # Required: Paths to input/output directories
 input_path: "/path/to/your/exam/pdfs"

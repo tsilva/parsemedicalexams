@@ -14,6 +14,19 @@ logger = logging.getLogger(__name__)
 UNKNOWN_VALUE = "$UNKNOWN$"
 
 
+def _is_running_in_docker() -> bool:
+    """Detect if running inside a Docker container."""
+    return os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv")
+
+
+def resolve_base_url(url: str) -> str:
+    """Swap 127.0.0.1/localhost with host.docker.internal when running in Docker."""
+    if _is_running_in_docker():
+        url = url.replace("://127.0.0.1", "://host.docker.internal")
+        url = url.replace("://localhost", "://host.docker.internal")
+    return url
+
+
 @dataclass
 class ProfileConfig:
     """Configuration for a user profile.
@@ -28,6 +41,13 @@ class ProfileConfig:
     # Optional overrides
     model: Optional[str] = None
     workers: Optional[int] = None
+
+    # Demographics (for extraction context)
+    full_name: Optional[str] = None
+    birth_date: Optional[str] = None  # YYYY-MM-DD
+    gender: Optional[str] = None
+    nationality: Optional[str] = None
+    locale: Optional[str] = None  # e.g. "pt-PT"
 
     @classmethod
     def from_file(cls, profile_path: Path) -> 'ProfileConfig':
@@ -61,6 +81,11 @@ class ProfileConfig:
             input_file_regex=input_file_regex,
             model=model,
             workers=workers,
+            full_name=data.get('full_name'),
+            birth_date=data.get('birth_date'),
+            gender=data.get('gender'),
+            nationality=data.get('nationality'),
+            locale=data.get('locale'),
         )
 
     @classmethod
@@ -90,6 +115,7 @@ class ExtractionConfig:
     openrouter_base_url: str
     validation_model_id: str
     max_workers: int
+    summarize_max_input_tokens: int
 
     @classmethod
     def from_env(cls) -> 'ExtractionConfig':
@@ -108,9 +134,12 @@ class ExtractionConfig:
         openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
         validation_model_id = os.getenv("VALIDATION_MODEL_ID", "anthropic/claude-haiku-4.5")
         max_workers_str = os.getenv("MAX_WORKERS", "1")
+        summarize_max_input_tokens = int(os.getenv("SUMMARIZE_MAX_INPUT_TOKENS", "100000"))
 
         # Load base URL with fallback to OpenRouter
-        openrouter_base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+        openrouter_base_url = resolve_base_url(
+            os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+        )
 
         # Validate required fields (paths can be provided by profile)
         if not self_consistency_model_id:
@@ -145,4 +174,5 @@ class ExtractionConfig:
             openrouter_base_url=openrouter_base_url,
             validation_model_id=validation_model_id,
             max_workers=max_workers,
+            summarize_max_input_tokens=summarize_max_input_tokens,
         )

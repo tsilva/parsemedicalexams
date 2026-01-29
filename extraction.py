@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pydantic import BaseModel, Field
 from openai import OpenAI, APIError
 
+from config import resolve_base_url
 from utils import parse_llm_json_response, load_prompt
 
 logger = logging.getLogger(__name__)
@@ -150,7 +151,7 @@ CLASSIFICATION_TOOLS = [
 # Self-Consistency
 # ========================================
 
-def self_consistency(fn, model_id, n, *args, **kwargs):
+def self_consistency(fn, model_id, n, *args, base_url=None, api_key=None, **kwargs):
     """
     Run a function multiple times and vote on the best result.
 
@@ -199,17 +200,17 @@ def self_consistency(fn, model_id, n, *args, **kwargs):
         return results[0], results
 
     # Vote on best result using LLM
-    return vote_on_best_result(results, model_id, fn.__name__)
+    return vote_on_best_result(results, model_id, fn.__name__, base_url=base_url, api_key=api_key)
 
 
-def vote_on_best_result(results: list, model_id: str, fn_name: str):
+def vote_on_best_result(results: list, model_id: str, fn_name: str, base_url: str = None, api_key: str = None):
     """Use LLM to vote on the most consistent result."""
     from openai import OpenAI
     import os
 
     client = OpenAI(
-        base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-        api_key=os.getenv("OPENROUTER_API_KEY")
+        base_url=base_url or resolve_base_url(os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")),
+        api_key=api_key or os.getenv("OPENROUTER_API_KEY")
     )
 
     system_prompt = load_prompt("voting_system")
@@ -254,7 +255,8 @@ def extract_exams_from_page_image(
     image_path: Path,
     model_id: str,
     client: OpenAI,
-    temperature: float = 0.3
+    temperature: float = 0.3,
+    profile_context: str = ""
 ) -> dict:
     """
     Extract medical exams from a page image using vision model.
@@ -272,6 +274,7 @@ def extract_exams_from_page_image(
         img_data = base64.standard_b64encode(img_file.read()).decode("utf-8")
 
     system_prompt = load_prompt("extraction_system")
+    system_prompt = system_prompt.format(patient_context=profile_context)
     user_prompt = load_prompt("extraction_user")
 
     try:
@@ -349,7 +352,8 @@ def classify_document(
     image_paths: List[Path],
     model_id: str,
     client: OpenAI,
-    temperature: float = 0.1
+    temperature: float = 0.1,
+    profile_context: str = ""
 ) -> DocumentClassification:
     """
     Classify whether a document is a medical exam by analyzing all pages.
@@ -374,6 +378,7 @@ def classify_document(
         })
 
     system_prompt = load_prompt("classification_system")
+    system_prompt = system_prompt.format(patient_context=profile_context)
     user_prompt = load_prompt("classification_user")
 
     try:

@@ -190,7 +190,7 @@ def extract_dates_from_text(text: str) -> list[str]:
     return dates
 
 
-def select_most_frequent_date(exams: list[dict]) -> str | None:
+def select_most_frequent_date(exams: list[dict], exclude_dates: set[str] | None = None, filename_date: str | None = None) -> str | None:
     """
     Select the most frequent date across all pages using frequency-based voting.
 
@@ -198,9 +198,13 @@ def select_most_frequent_date(exams: list[dict]) -> str | None:
     may have different dates than the actual medical records (e.g., 1997 hospitalization).
 
     First extracts dates from each page's transcription, then votes on the most frequent.
+    If the result conflicts with the filename date, and the filename date appears in at least
+    one page's transcription, prefer the filename date (handles DD/MM vs MM/DD ambiguity).
 
     Args:
         exams: List of exam dictionaries with transcriptions
+        exclude_dates: Dates to exclude (e.g. patient birth date)
+        filename_date: Date extracted from filename (YYYY-MM-DD), used as tiebreaker
 
     Returns:
         The most frequently occurring date, or None if no dates found
@@ -214,10 +218,13 @@ def select_most_frequent_date(exams: list[dict]) -> str | None:
 
     # Extract dates from each page's transcription
     all_dates = []
+    _exclude = exclude_dates or set()
     for exam in exams:
         transcription = exam.get("transcription", "")
         if transcription:
             page_dates = extract_dates_from_text(transcription)
+            # Filter out excluded dates (e.g. patient birth date)
+            page_dates = [d for d in page_dates if d not in _exclude]
             # Use the earliest date on each page as that page's representative date
             if page_dates:
                 page_date = min(page_dates)  # Earliest = likely the exam date
@@ -241,6 +248,16 @@ def select_most_frequent_date(exams: list[dict]) -> str | None:
         logger.info(f"Multi-era document detected. Date frequency: {dict(date_counts)}")
         logger.info(f"Selected most frequent date: {most_common_date} ({count}/{len(all_dates)} pages)")
 
+    # If the most common date conflicts with the filename date, and the filename date
+    # appears in at least one page, prefer the filename date. This handles DD/MM vs MM/DD
+    # ambiguity where software timestamps use MM/DD but the actual exam date uses DD/MM.
+    if filename_date and most_common_date != filename_date and filename_date in date_counts:
+        logger.info(
+            f"Filename date override: {filename_date} (found in {date_counts[filename_date]} pages) "
+            f"overrides frequency winner {most_common_date} ({count} pages)"
+        )
+        return filename_date
+
     return most_common_date
 
 
@@ -249,7 +266,10 @@ def process_single_pdf(
     output_path: Path,
     config: ExtractionConfig,
     client: OpenAI,
-    page_filter: int | None = None
+    page_filter: int | None = None,
+    profile_context: str = "",
+    birth_date: str | None = None,
+    force_regenerate_images: bool = False
 ) -> int | None | str:
     """
     Process a single PDF file using two-phase approach:
@@ -271,42 +291,67 @@ def process_single_pdf(
     doc_stem = pdf_path.stem
     logger.info(f"Processing: {pdf_path.name}")
 
-    # Convert PDF to images in temp directory first (before classification)
-    try:
-        pages = convert_from_path(str(pdf_path))
-    except Exception as e:
-        logger.error(f"Failed to convert PDF to images: {pdf_path.name}: {e}")
-        return None
+    # Check if we can reuse existing images from output directory
+    doc_output_dir = output_path / doc_stem
+    existing_images = sorted(doc_output_dir.glob(f"{doc_stem}.*.jpg")) if doc_output_dir.exists() else []
+
+    # Delete existing images if force regeneration requested
+    if force_regenerate_images and existing_images:
+        logger.info(f"Force regenerating {len(existing_images)} images")
+        for img_path in existing_images:
+            img_path.unlink()
+        existing_images = []
+
+    # Convert PDF to images (or reuse existing ones)
+    if existing_images:
+        logger.info(f"Reusing {len(existing_images)} existing images from output directory")
+        pages = None  # Not needed
+    else:
+        try:
+            pages = convert_from_path(str(pdf_path))
+        except Exception as e:
+            logger.error(f"Failed to convert PDF to images: {pdf_path.name}: {e}")
+            return None
 
     # Create temp directory for classification images
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
         temp_image_paths = []
 
-        # Preprocess and save images to temp directory
-        for page_num, page_image in enumerate(pages, start=1):
-            processed_image = preprocess_page_image(page_image)
-            temp_image_path = temp_path / f"{doc_stem}.{page_num:03d}.jpg"
-            processed_image.save(str(temp_image_path), "JPEG", quality=95)
-            temp_image_paths.append(temp_image_path)
+        if existing_images:
+            # Use existing images directly
+            temp_image_paths = existing_images
+        else:
+            # Preprocess and save images to temp directory
+            for page_num, page_image in enumerate(pages, start=1):
+                processed_image = preprocess_page_image(page_image)
+                temp_image_path = temp_path / f"{doc_stem}.{page_num:03d}.jpg"
+                processed_image.save(str(temp_image_path), "JPEG", quality=80)
+                temp_image_paths.append(temp_image_path)
 
-        # PHASE 1: Classify document
-        logger.debug(f"Classifying document: {pdf_path.name} ({len(temp_image_paths)} pages)")
-        try:
-            classification = classify_document(
-                temp_image_paths,
-                config.extract_model_id,
-                client
-            )
-        except Exception as e:
-            logger.error(f"Classification failed for {pdf_path.name}: {e}")
-            # Default to treating as exam to avoid missing content
+        # PHASE 1: Classify document (skip when reprocessing a specific page)
+        if page_filter is not None:
+            # When reprocessing a specific page, skip classification
+            logger.debug(f"Skipping classification for page-specific reprocessing: {pdf_path.name}")
             classification = DocumentClassification(is_exam=True)
+        else:
+            logger.debug(f"Classifying document: {pdf_path.name} ({len(temp_image_paths)} pages)")
+            try:
+                classification = classify_document(
+                    temp_image_paths,
+                    config.extract_model_id,
+                    client,
+                    profile_context=profile_context
+                )
+            except Exception as e:
+                logger.error(f"Classification failed for {pdf_path.name}: {e}")
+                # Default to treating as exam to avoid missing content
+                classification = DocumentClassification(is_exam=True)
 
-        # If not an exam, skip this document
-        if not classification.is_exam:
-            logger.info(f"Skipped (not a medical exam): {pdf_path.name}")
-            return "skipped"
+            # If not an exam, skip this document
+            if not classification.is_exam:
+                logger.info(f"Skipped (not a medical exam): {pdf_path.name}")
+                return "skipped"
 
         # PHASE 2: Document is an exam - create output directory and transcribe all pages
         doc_output_dir = output_path / doc_stem
@@ -320,12 +365,15 @@ def process_single_pdf(
             except PermissionError:
                 logger.warning(f"Could not copy PDF to output (permission denied): {pdf_path.name}")
 
-        # Move images from temp to output directory
-        image_paths = []
-        for temp_image_path in temp_image_paths:
-            final_image_path = doc_output_dir / temp_image_path.name
-            shutil.copy2(temp_image_path, final_image_path)
-            image_paths.append(final_image_path)
+        # Move images from temp to output directory (skip if reusing existing)
+        if existing_images:
+            image_paths = existing_images
+        else:
+            image_paths = []
+            for temp_image_path in temp_image_paths:
+                final_image_path = doc_output_dir / temp_image_path.name
+                shutil.copy2(temp_image_path, final_image_path)
+                image_paths.append(final_image_path)
 
         # Get document-level metadata from classification
         exam_name = classification.exam_name_raw or doc_stem
@@ -353,7 +401,9 @@ def process_single_pdf(
                         config.n_extractions,
                         image_path,
                         config.extract_model_id,
-                        client
+                        client,
+                        base_url=config.openrouter_base_url,
+                        api_key=config.openrouter_api_key
                     )
                     # Use LLM to assess semantic agreement for confidence
                     confidence = score_transcription_confidence(
@@ -374,14 +424,16 @@ def process_single_pdf(
                 logger.error(f"Transcription failed for {image_path.name}: {e}")
                 transcription = ""
 
-            # Validate transcription quality
-            is_valid, reason = validate_transcription(transcription, config.validation_model_id, client)
-            if not is_valid:
-                logger.warning(f"Invalid transcription for {image_path.name}: {reason}. Retrying with {config.validation_model_id}...")
+            # Validate transcription quality, retry up to MAX_RETRIES times with fallback model
+            MAX_RETRIES = 3
+            for retry in range(MAX_RETRIES):
+                is_valid, reason = validate_transcription(transcription, config.validation_model_id, client)
+                if is_valid:
+                    break
+                logger.warning(f"Invalid transcription for {image_path.name}: {reason} (attempt {retry + 1}/{MAX_RETRIES}). Retrying with {config.validation_model_id}...")
                 transcription = transcribe_page(image_path, config.validation_model_id, client)
-                is_valid2, reason2 = validate_transcription(transcription, config.validation_model_id, client)
-                if not is_valid2:
-                    logger.error(f"Transcription failed validation after retry for {image_path.name}: {reason2}")
+            else:
+                logger.error(f"Transcription failed validation after {MAX_RETRIES} retries for {image_path.name}: {reason}")
 
             if not transcription:
                 logger.warning(f"Empty transcription for {image_path.name}")
@@ -422,7 +474,9 @@ def process_single_pdf(
 
     # Apply frequency-based date correction for multi-era documents
     if all_exams:
-        corrected_date = select_most_frequent_date(all_exams)
+        exclude_dates = {birth_date} if birth_date else None
+        filename_date = extract_date_from_filename(pdf_path.name)
+        corrected_date = select_most_frequent_date(all_exams, exclude_dates=exclude_dates, filename_date=filename_date)
         if corrected_date:
             logger.debug(f"Selected document date by frequency: {corrected_date}")
             # Update all exams with the corrected date
@@ -447,7 +501,10 @@ def process_single_pdf(
             save_transcription_file([exam], doc_output_dir, doc_stem, page_num)
 
         # Generate document-level summary
-        document_summary = summarize_document(all_exams, config.summarize_model_id, client)
+        document_summary = summarize_document(
+            all_exams, config.summarize_model_id, client,
+            max_input_tokens=config.summarize_max_input_tokens,
+        )
         save_document_summary(document_summary, doc_output_dir, doc_stem, all_exams)
 
     logger.info(f"Processed {len(all_exams)} pages for: {pdf_path.name}")
@@ -509,7 +566,7 @@ def frontmatter_to_exam(frontmatter: dict, transcription: str, page_num: int, so
     }
 
 
-def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: OpenAI, input_path: Path | None = None):
+def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: OpenAI, input_path: Path | None = None, doc_filter: str | None = None):
     """
     Regenerate document-level summary files from existing transcription (.md) files.
 
@@ -520,11 +577,33 @@ def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: Op
     # Find all document directories
     doc_dirs = [d for d in output_path.iterdir() if d.is_dir() and d.name != "logs"]
 
+    # Apply document filter if specified
+    if doc_filter:
+        query = doc_filter.lower()
+        query_stem = query[:-4] if query.endswith('.pdf') else query
+        doc_dirs = [d for d in doc_dirs if d.name.lower() == query_stem or d.name.lower() == query]
+        if not doc_dirs:
+            logger.error(f"No matching document directory found for: {doc_filter}")
+            return 0
+
     logger.info(f"Found {len(doc_dirs)} document directories to regenerate")
 
     total_exams = 0
     for doc_dir in tqdm(doc_dirs, desc="Regenerating summaries"):
         doc_stem = doc_dir.name
+
+        # Page completeness check: compare .jpg count to .md transcription count
+        jpg_files = list(doc_dir.glob(f"{doc_stem}.*.jpg"))
+        md_transcription_files = [
+            f for f in doc_dir.glob(f"{doc_stem}.*.md")
+            if not f.name.endswith(".summary.md")
+        ]
+        if jpg_files and len(jpg_files) != len(md_transcription_files):
+            logger.error(
+                f"Skipping {doc_stem}: page count mismatch — "
+                f"{len(jpg_files)} images but {len(md_transcription_files)} transcriptions"
+            )
+            continue
 
         # Copy source PDF if missing and input_path is provided
         if input_path:
@@ -580,7 +659,10 @@ def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: Op
             old_summary.unlink()
 
         # Generate document-level summary
-        document_summary = summarize_document(all_exams, config.summarize_model_id, client)
+        document_summary = summarize_document(
+            all_exams, config.summarize_model_id, client,
+            max_input_tokens=config.summarize_max_input_tokens,
+        )
 
         # Save one summary for the entire document
         save_document_summary(document_summary, doc_dir, doc_stem, all_exams)
@@ -710,6 +792,8 @@ Examples:
   python main.py --profile tsilva              # Process all new PDFs
   python main.py --list-profiles               # List available profiles
   python main.py -p tsilva --regenerate        # Regenerate summaries only
+  python main.py -p tsilva --resummarize       # Resummarize all documents
+  python main.py -p tsilva --resummarize -d exam.pdf  # Resummarize one document
   python main.py -p tsilva --reprocess-all     # Force reprocess all documents
   python main.py -p tsilva -d exam.pdf         # Reprocess specific document
   python main.py -p tsilva -d exam.pdf --page 2  # Reprocess specific page
@@ -729,6 +813,11 @@ Examples:
         "--regenerate",
         action="store_true",
         help="Regenerate summaries from existing transcription files"
+    )
+    parser.add_argument(
+        "--resummarize",
+        action="store_true",
+        help="Regenerate summaries only (use with -d to target a specific document)"
     )
     parser.add_argument(
         "--reprocess-all",
@@ -858,6 +947,34 @@ def run_profile(profile_name: str, args) -> bool:
         api_key=config.openrouter_api_key
     )
 
+    # Build profile context for extraction prompt
+    profile_context = ""
+    if profile.birth_date or profile.full_name:
+        parts = []
+        if profile.full_name:
+            parts.append(f"Patient name: {profile.full_name}")
+        if profile.birth_date:
+            parts.append(f"Patient date of birth: {profile.birth_date}")
+            parts.append(f"IMPORTANT: {profile.birth_date} is the patient's birth date — NEVER use it as exam_date")
+        if profile.locale:
+            parts.append(f"Locale: {profile.locale} (dates in documents typically use DD/MM/YYYY format)")
+        profile_context = "PATIENT CONTEXT:\n" + "\n".join(parts)
+        logger.info(f"Profile context injected into extraction prompt")
+
+    # Handle --resummarize mode
+    if args.resummarize:
+        doc_filter = args.document if hasattr(args, 'document') else None
+        if doc_filter:
+            logger.info(f"Resummarize mode: regenerating summary for {doc_filter}")
+        else:
+            logger.info("Resummarize mode: regenerating all summaries")
+        total_exams = regenerate_summaries(config.output_path, config, client, config.input_path, doc_filter=doc_filter)
+        logger.info("=" * 60)
+        logger.info("Resummarize Complete")
+        logger.info("=" * 60)
+        logger.info(f"Regenerated summaries for {total_exams} exams")
+        return True
+
     # Handle --regenerate mode
     if args.regenerate:
         logger.info("Regeneration mode: re-summarizing from existing transcription files")
@@ -940,7 +1057,10 @@ def run_profile(profile_name: str, args) -> bool:
         try:
             result = process_single_pdf(
                 pdf_path, config.output_path, config, client,
-                page_filter=args.page
+                page_filter=args.page,
+                profile_context=profile_context,
+                birth_date=profile.birth_date,
+                force_regenerate_images=bool(args.document)
             )
             if result == "skipped":
                 skipped_documents.append(pdf_path.name)

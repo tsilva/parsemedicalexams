@@ -81,3 +81,4 @@ yarn-error.log*
 # Build artifacts and caches
 node_modules/
 .npm/
+*.code-workspace
