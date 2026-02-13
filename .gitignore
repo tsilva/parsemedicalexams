@@ -82,3 +82,9 @@ yarn-error.log*
 node_modules/
 .npm/
 *.code-workspace
+
+
+# Managed by tsilva/.github
+# Do not remove - synced automatically
+.claude/
+*.pyc
