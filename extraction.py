@@ -268,6 +268,7 @@ def extract_exams_from_page_image(
     client: OpenAI,
     temperature: float = 0.3,
     profile_context: str = "",
+    prompt_variant: str = "extraction_system",
 ) -> dict:
     """
     Extract medical exams from a page image using vision model.
@@ -284,7 +285,7 @@ def extract_exams_from_page_image(
     with open(image_path, "rb") as img_file:
         img_data = base64.standard_b64encode(img_file.read()).decode("utf-8")
 
-    system_prompt = load_prompt("extraction_system")
+    system_prompt = load_prompt(prompt_variant)
     system_prompt = system_prompt.format(patient_context=profile_context)
     user_prompt = load_prompt("extraction_user")
 
@@ -374,6 +375,108 @@ def extract_exams_from_page_image(
         return MedicalExamReport(exams=[]).model_dump(mode="json")
 
 
+# Prompt variants for retry on refusal
+EXTRACTION_PROMPT_VARIANTS = [
+    "extraction_system",
+    "extraction_system_alt1",
+    "extraction_system_alt2",
+    "extraction_system_alt3",
+]
+
+
+def extract_with_retry(
+    image_path: Path,
+    model_id: str,
+    client: OpenAI,
+    temperature: float = 0.3,
+    profile_context: str = "",
+    max_retries: int = 3,
+) -> tuple[dict, str]:
+    """
+    Extract exams with automatic retry on refusal using different prompt variants.
+
+    Args:
+        image_path: Path to the preprocessed page image
+        model_id: Vision model to use for extraction
+        client: OpenAI client instance
+        temperature: Temperature for sampling
+        profile_context: Patient context string
+        max_retries: Maximum number of prompt variants to try (default 3 = original + 2 alts)
+
+    Returns:
+        Tuple of (extraction_result_dict, prompt_variant_used)
+    """
+    last_result = None
+    last_error = None
+
+    # Try each prompt variant in sequence
+    for attempt, prompt_variant in enumerate(
+        EXTRACTION_PROMPT_VARIANTS[: max_retries + 1]
+    ):
+        try:
+            logger.debug(
+                f"Extraction attempt {attempt + 1} using {prompt_variant} for {image_path.name}"
+            )
+
+            result = extract_exams_from_page_image(
+                image_path=image_path,
+                model_id=model_id,
+                client=client,
+                temperature=temperature,
+                profile_context=profile_context,
+                prompt_variant=prompt_variant,
+            )
+
+            # Check if result is valid (has exams or explicitly no exam data)
+            if result and isinstance(result, dict):
+                # Check for meaningful extraction
+                has_exams = bool(result.get("exams"))
+                page_has_data = result.get("page_has_exam_data")
+
+                # Success cases:
+                # 1. Has exams extracted
+                # 2. Page explicitly marked as having no exam data
+                if has_exams or page_has_data is False:
+                    if attempt > 0:
+                        logger.info(
+                            f"Extraction succeeded with alternative prompt "
+                            f"({prompt_variant}) on attempt {attempt + 1} for {image_path.name}"
+                        )
+                    return result, prompt_variant
+
+                # If empty result, this might be a refusal - try next variant
+                if not has_exams and page_has_data is not False:
+                    logger.warning(
+                        f"Empty extraction with {prompt_variant} for {image_path.name}, "
+                        f"trying alternative prompt..."
+                    )
+                    last_result = result
+                    continue
+
+            last_result = result
+
+        except Exception as e:
+            logger.warning(f"Extraction failed with {prompt_variant}: {e}")
+            last_error = e
+            continue
+
+    # All variants exhausted - return the best we got
+    if last_result:
+        logger.error(
+            f"All {max_retries + 1} prompt variants failed for {image_path.name}. "
+            f"Returning last result."
+        )
+        return last_result, EXTRACTION_PROMPT_VARIANTS[0]
+
+    # Complete failure - return empty result
+    logger.error(
+        f"Complete extraction failure for {image_path.name}. Last error: {last_error}"
+    )
+    return MedicalExamReport(exams=[]).model_dump(
+        mode="json"
+    ), EXTRACTION_PROMPT_VARIANTS[0]
+
+
 def classify_document(
     image_paths: List[Path],
     model_id: str,
@@ -458,7 +561,12 @@ def classify_document(
 
 
 def transcribe_page(
-    image_path: Path, model_id: str, client: OpenAI, temperature: float = 0.1
+    image_path: Path,
+    model_id: str,
+    client: OpenAI,
+    temperature: float = 0.1,
+    prompt_variant: str = "transcription_system",
+    profile_context: str = "",
 ) -> str:
     """
     Transcribe all visible text from a page verbatim.
@@ -468,6 +576,8 @@ def transcribe_page(
         model_id: Vision model to use for transcription
         client: OpenAI client instance
         temperature: Temperature for sampling (low for OCR)
+        prompt_variant: Which system prompt variant to use
+        profile_context: Patient context string for prompt formatting
 
     Returns:
         String with complete verbatim transcription
@@ -475,7 +585,8 @@ def transcribe_page(
     with open(image_path, "rb") as img_file:
         img_data = base64.standard_b64encode(img_file.read()).decode("utf-8")
 
-    system_prompt = load_prompt("transcription_system")
+    system_prompt = load_prompt(prompt_variant)
+    system_prompt = system_prompt.format(patient_context=profile_context)
     user_prompt = load_prompt("transcription_user")
 
     try:
@@ -535,6 +646,89 @@ def transcribe_page(
             pass  # Not valid JSON, return as-is
 
     return content
+
+
+# Prompt variants for retry on transcription refusal
+TRANSCRIPTION_PROMPT_VARIANTS = [
+    "transcription_system",
+    "transcription_system_alt1",
+    "transcription_system_alt2",
+    "transcription_system_alt3",
+]
+
+
+def transcribe_with_retry(
+    image_path: Path,
+    model_id: str,
+    client: OpenAI,
+    validation_model_id: str,
+    temperature: float = 0.1,
+    profile_context: str = "",
+    max_retries: int = 3,
+) -> tuple[str, str, int]:
+    """
+    Transcribe page with automatic retry on refusal using different prompt variants.
+
+    Args:
+        image_path: Path to the preprocessed page image
+        model_id: Vision model to use for transcription
+        client: OpenAI client instance
+        validation_model_id: Model to use for refusal detection
+        temperature: Temperature for sampling (low for OCR)
+        profile_context: Patient context string for prompt formatting
+        max_retries: Maximum number of prompt variants to try (default 3 = original + 2 alts)
+
+    Returns:
+        Tuple of (transcription_text, prompt_variant_used, attempts_made)
+    """
+    for attempt, prompt_variant in enumerate(
+        TRANSCRIPTION_PROMPT_VARIANTS[: max_retries + 1]
+    ):
+        try:
+            logger.debug(
+                f"Transcription attempt {attempt + 1} using {prompt_variant} for {image_path.name}"
+            )
+
+            transcription = transcribe_page(
+                image_path=image_path,
+                model_id=model_id,
+                client=client,
+                temperature=temperature,
+                prompt_variant=prompt_variant,
+                profile_context=profile_context,
+            )
+
+            # Check if transcription is valid (not a refusal)
+            is_valid, reason = validate_transcription(
+                transcription, validation_model_id, client
+            )
+
+            if is_valid:
+                if attempt > 0:
+                    logger.info(
+                        f"Transcription succeeded with alternative prompt "
+                        f"({prompt_variant}) on attempt {attempt + 1} for {image_path.name}"
+                    )
+                return transcription, prompt_variant, attempt + 1
+
+            # If refusal detected, try next variant
+            logger.warning(
+                f"Transcription refusal detected ({reason}) with {prompt_variant} "
+                f"for {image_path.name}, trying alternative prompt..."
+            )
+
+        except Exception as e:
+            logger.warning(
+                f"Transcription failed with {prompt_variant} for {image_path.name}: {e}"
+            )
+            continue
+
+    # All variants exhausted - return the last transcription even if invalid
+    logger.error(
+        f"All {max_retries + 1} prompt variants failed for {image_path.name}. "
+        f"Returning last transcription."
+    )
+    return transcription, TRANSCRIPTION_PROMPT_VARIANTS[0], max_retries + 1
 
 
 def validate_transcription(

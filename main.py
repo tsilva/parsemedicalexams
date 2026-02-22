@@ -19,6 +19,8 @@ from tqdm import tqdm
 from config import ExtractionConfig, ProfileConfig
 from extraction import (
     extract_exams_from_page_image,
+    extract_with_retry,
+    transcribe_with_retry,
     self_consistency,
     classify_document,
     transcribe_page,
@@ -84,6 +86,10 @@ def save_transcription_file(
             frontmatter["page"] = exam["page_number"]
         if exam.get("source_file"):
             frontmatter["source"] = exam["source_file"]
+        if exam.get("prompt_variant"):
+            frontmatter["prompt_variant"] = exam["prompt_variant"]
+        if exam.get("retry_attempts") and exam["retry_attempts"] > 1:
+            frontmatter["retry_attempts"] = exam["retry_attempts"]
 
     # Write file
     transcriptions = [exam.get("transcription", "") for exam in exams]
@@ -457,10 +463,15 @@ def process_single_pdf(
             if page_filter is not None and page_num != page_filter:
                 return None
 
-            # Transcribe page (with optional self-consistency voting)
+            # Transcribe page with automatic retry on refusal using different prompt variants
             confidence = None
+            prompt_variant_used = "transcription_system"
+            retry_attempts = 1
+            transcription = ""
+
             try:
                 if config.n_extractions > 1:
+                    # Self-consistency mode: use transcribe_page directly with retry wrapper
                     transcription, all_transcriptions = self_consistency(
                         transcribe_page,
                         config.self_consistency_model_id,
@@ -470,6 +481,7 @@ def process_single_pdf(
                         client,
                         base_url=config.openrouter_base_url,
                         api_key=config.openrouter_api_key,
+                        profile_context=profile_context,
                     )
                     # Use LLM to assess semantic agreement for confidence
                     confidence = score_transcription_confidence(
@@ -483,8 +495,17 @@ def process_single_pdf(
                             f"Self-consistency confidence: {confidence:.2f} for {image_path.name}"
                         )
                 else:
-                    transcription = transcribe_page(
-                        image_path, config.extract_model_id, client
+                    # Single extraction with prompt variant retry on refusal
+                    transcription, prompt_variant_used, retry_attempts = (
+                        transcribe_with_retry(
+                            image_path=image_path,
+                            model_id=config.extract_model_id,
+                            client=client,
+                            validation_model_id=config.validation_model_id,
+                            temperature=0.1,
+                            profile_context=profile_context,
+                            max_retries=3,
+                        )
                     )
             except Exception as e:
                 logger.error(f"Transcription failed for {image_path.name}: {e}")
@@ -500,6 +521,13 @@ def process_single_pdf(
             if not transcription:
                 logger.warning(f"Empty transcription for {image_path.name}")
 
+            # Log if alternative prompt was needed
+            if retry_attempts > 1:
+                logger.info(
+                    f"Required {retry_attempts} prompt attempts for {image_path.name}, "
+                    f"final variant: {prompt_variant_used}"
+                )
+
             # Create exam entry for this page
             return {
                 "exam_name_raw": exam_name,
@@ -508,6 +536,8 @@ def process_single_pdf(
                 "page_number": page_num,
                 "source_file": pdf_path.name,
                 "transcription_confidence": confidence,
+                "prompt_variant": prompt_variant_used,
+                "retry_attempts": retry_attempts,
                 "physician_name": classification.physician_name,
                 "department": classification.department,
                 "facility_name": facility_name,
