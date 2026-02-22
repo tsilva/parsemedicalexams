@@ -24,7 +24,7 @@ from extraction import (
     transcribe_page,
     score_transcription_confidence,
     validate_transcription,
-    DocumentClassification
+    DocumentClassification,
 )
 from standardization import standardize_exam_types
 from summarization import summarize_document
@@ -41,15 +41,16 @@ def is_document_processed(pdf_path: Path, output_path: Path) -> bool:
     if not doc_output_dir.exists():
         return False
     # Find .md files excluding .summary.md
-    md_files = [f for f in doc_output_dir.glob(f"{doc_stem}.*.md") if not f.name.endswith(".summary.md")]
+    md_files = [
+        f
+        for f in doc_output_dir.glob(f"{doc_stem}.*.md")
+        if not f.name.endswith(".summary.md")
+    ]
     return len(md_files) > 0
 
 
 def save_transcription_file(
-    exams: list[dict],
-    doc_output_dir: Path,
-    doc_stem: str,
-    page_num: int
+    exams: list[dict], doc_output_dir: Path, doc_stem: str, page_num: int
 ) -> None:
     """
     Save page transcription as markdown file with YAML frontmatter.
@@ -86,19 +87,23 @@ def save_transcription_file(
 
     # Write file
     transcriptions = [exam.get("transcription", "") for exam in exams]
-    with open(md_path, 'w', encoding='utf-8') as f:
+    with open(md_path, "w", encoding="utf-8") as f:
         if frontmatter:
             f.write("---\n")
-            f.write(yaml.dump(frontmatter, default_flow_style=False, allow_unicode=True, sort_keys=False))
+            f.write(
+                yaml.dump(
+                    frontmatter,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                    sort_keys=False,
+                )
+            )
             f.write("---\n\n")
         f.write("\n\n".join(transcriptions).strip() + "\n")
 
 
 def save_document_summary(
-    summary: str,
-    doc_output_dir: Path,
-    doc_stem: str,
-    exams: list[dict] = None
+    summary: str, doc_output_dir: Path, doc_stem: str, exams: list[dict] = None
 ) -> None:
     """
     Save document-level summary as markdown file with YAML frontmatter.
@@ -126,10 +131,17 @@ def save_document_summary(
             if exam.get("department"):
                 frontmatter["department"] = exam["department"]
 
-        with open(summary_path, 'w', encoding='utf-8') as f:
+        with open(summary_path, "w", encoding="utf-8") as f:
             if frontmatter:
                 f.write("---\n")
-                f.write(yaml.dump(frontmatter, default_flow_style=False, allow_unicode=True, sort_keys=False))
+                f.write(
+                    yaml.dump(
+                        frontmatter,
+                        default_flow_style=False,
+                        allow_unicode=True,
+                        sort_keys=False,
+                    )
+                )
                 f.write("---\n\n")
             f.write(summary.strip() + "\n")
 
@@ -190,7 +202,11 @@ def extract_dates_from_text(text: str) -> list[str]:
     return dates
 
 
-def select_most_frequent_date(exams: list[dict], exclude_dates: set[str] | None = None, filename_date: str | None = None) -> str | None:
+def select_most_frequent_date(
+    exams: list[dict],
+    exclude_dates: set[str] | None = None,
+    filename_date: str | None = None,
+) -> str | None:
     """
     Select the most frequent date across all pages using frequency-based voting.
 
@@ -246,12 +262,18 @@ def select_most_frequent_date(exams: list[dict], exclude_dates: set[str] | None 
     # Log if there's date variation (indicating multi-era document)
     if len(date_counts) > 1:
         logger.info(f"Multi-era document detected. Date frequency: {dict(date_counts)}")
-        logger.info(f"Selected most frequent date: {most_common_date} ({count}/{len(all_dates)} pages)")
+        logger.info(
+            f"Selected most frequent date: {most_common_date} ({count}/{len(all_dates)} pages)"
+        )
 
     # If the most common date conflicts with the filename date, and the filename date
     # appears in at least one page, prefer the filename date. This handles DD/MM vs MM/DD
     # ambiguity where software timestamps use MM/DD but the actual exam date uses DD/MM.
-    if filename_date and most_common_date != filename_date and filename_date in date_counts:
+    if (
+        filename_date
+        and most_common_date != filename_date
+        and filename_date in date_counts
+    ):
         logger.info(
             f"Filename date override: {filename_date} (found in {date_counts[filename_date]} pages) "
             f"overrides frequency winner {most_common_date} ({count} pages)"
@@ -269,8 +291,40 @@ def process_single_pdf(
     page_filter: int | None = None,
     profile_context: str = "",
     birth_date: str | None = None,
-    force_regenerate_images: bool = False
+    force_regenerate_images: bool = False,
 ) -> int | None | str:
+    """
+    Process a single PDF file using two-phase approach:
+    1. Classify document (is it a medical exam?)
+    2. If yes, transcribe all pages verbatim
+
+    Args:
+        pdf_path: Path to the PDF file
+        output_path: Base output directory
+        config: Extraction configuration
+        client: OpenAI client instance
+        page_filter: If set, only process this specific page number
+
+    Returns:
+        Number of pages processed if success
+        None if processing failed
+        "skipped" if document is not a medical exam
+    """
+    doc_stem = pdf_path.stem
+    logger.info(f"Processing: {pdf_path.name}")
+
+    # DRY RUN: Skip all processing, just count pages
+    if config.dry_run:
+        try:
+            pages = convert_from_path(str(pdf_path))
+            page_count = len(pages)
+        except Exception as e:
+            logger.error(f"Failed to count pages in PDF: {pdf_path.name}: {e}")
+            return None
+        logger.info(f"[DRY RUN] Would process {page_count} pages: {pdf_path.name}")
+        return page_count
+
+    # NORMAL MODE: Continue with full processing
     """
     Process a single PDF file using two-phase approach:
     1. Classify document (is it a medical exam?)
@@ -293,7 +347,11 @@ def process_single_pdf(
 
     # Check if we can reuse existing images from output directory
     doc_output_dir = output_path / doc_stem
-    existing_images = sorted(doc_output_dir.glob(f"{doc_stem}.*.jpg")) if doc_output_dir.exists() else []
+    existing_images = (
+        sorted(doc_output_dir.glob(f"{doc_stem}.*.jpg"))
+        if doc_output_dir.exists()
+        else []
+    )
 
     # Delete existing images if force regeneration requested
     if force_regenerate_images and existing_images:
@@ -304,7 +362,9 @@ def process_single_pdf(
 
     # Convert PDF to images (or reuse existing ones)
     if existing_images:
-        logger.info(f"Reusing {len(existing_images)} existing images from output directory")
+        logger.info(
+            f"Reusing {len(existing_images)} existing images from output directory"
+        )
         pages = None  # Not needed
     else:
         try:
@@ -332,16 +392,20 @@ def process_single_pdf(
         # PHASE 1: Classify document (skip when reprocessing a specific page)
         if page_filter is not None:
             # When reprocessing a specific page, skip classification
-            logger.debug(f"Skipping classification for page-specific reprocessing: {pdf_path.name}")
+            logger.debug(
+                f"Skipping classification for page-specific reprocessing: {pdf_path.name}"
+            )
             classification = DocumentClassification(is_exam=True)
         else:
-            logger.debug(f"Classifying document: {pdf_path.name} ({len(temp_image_paths)} pages)")
+            logger.debug(
+                f"Classifying document: {pdf_path.name} ({len(temp_image_paths)} pages)"
+            )
             try:
                 classification = classify_document(
                     temp_image_paths,
                     config.extract_model_id,
                     client,
-                    profile_context=profile_context
+                    profile_context=profile_context,
                 )
             except Exception as e:
                 logger.error(f"Classification failed for {pdf_path.name}: {e}")
@@ -363,7 +427,9 @@ def process_single_pdf(
             try:
                 shutil.copy2(pdf_path, dest_pdf)
             except PermissionError:
-                logger.warning(f"Could not copy PDF to output (permission denied): {pdf_path.name}")
+                logger.warning(
+                    f"Could not copy PDF to output (permission denied): {pdf_path.name}"
+                )
 
         # Move images from temp to output directory (skip if reusing existing)
         if existing_images:
@@ -403,37 +469,33 @@ def process_single_pdf(
                         config.extract_model_id,
                         client,
                         base_url=config.openrouter_base_url,
-                        api_key=config.openrouter_api_key
+                        api_key=config.openrouter_api_key,
                     )
                     # Use LLM to assess semantic agreement for confidence
                     confidence = score_transcription_confidence(
                         transcription,
                         all_transcriptions,
                         config.self_consistency_model_id,
-                        client
+                        client,
                     )
                     if confidence < 1.0:
-                        logger.info(f"Self-consistency confidence: {confidence:.2f} for {image_path.name}")
+                        logger.info(
+                            f"Self-consistency confidence: {confidence:.2f} for {image_path.name}"
+                        )
                 else:
                     transcription = transcribe_page(
-                        image_path,
-                        config.extract_model_id,
-                        client
+                        image_path, config.extract_model_id, client
                     )
             except Exception as e:
                 logger.error(f"Transcription failed for {image_path.name}: {e}")
                 transcription = ""
 
-            # Validate transcription quality, retry up to MAX_RETRIES times with fallback model
-            MAX_RETRIES = 3
-            for retry in range(MAX_RETRIES):
-                is_valid, reason = validate_transcription(transcription, config.validation_model_id, client)
-                if is_valid:
-                    break
-                logger.warning(f"Invalid transcription for {image_path.name}: {reason} (attempt {retry + 1}/{MAX_RETRIES}). Retrying with {config.validation_model_id}...")
-                transcription = transcribe_page(image_path, config.validation_model_id, client)
-            else:
-                logger.error(f"Transcription failed validation after {MAX_RETRIES} retries for {image_path.name}: {reason}")
+            # Validate transcription quality
+            is_valid, reason = validate_transcription(
+                transcription, config.validation_model_id, client
+            )
+            if not is_valid:
+                logger.error(f"Invalid transcription for {image_path.name}: {reason}")
 
             if not transcription:
                 logger.warning(f"Empty transcription for {image_path.name}")
@@ -448,7 +510,7 @@ def process_single_pdf(
                 "transcription_confidence": confidence,
                 "physician_name": classification.physician_name,
                 "department": classification.department,
-                "facility_name": facility_name
+                "facility_name": facility_name,
             }
 
         # Process pages in parallel
@@ -465,7 +527,9 @@ def process_single_pdf(
                     if exam is not None:
                         all_exams.append(exam)
                         # Save transcription file immediately
-                        save_transcription_file([exam], doc_output_dir, doc_stem, page_num)
+                        save_transcription_file(
+                            [exam], doc_output_dir, doc_stem, page_num
+                        )
                 except Exception as e:
                     logger.error(f"Page {page_num} processing failed: {e}")
 
@@ -476,7 +540,9 @@ def process_single_pdf(
     if all_exams:
         exclude_dates = {birth_date} if birth_date else None
         filename_date = extract_date_from_filename(pdf_path.name)
-        corrected_date = select_most_frequent_date(all_exams, exclude_dates=exclude_dates, filename_date=filename_date)
+        corrected_date = select_most_frequent_date(
+            all_exams, exclude_dates=exclude_dates, filename_date=filename_date
+        )
         if corrected_date:
             logger.debug(f"Selected document date by frequency: {corrected_date}")
             # Update all exams with the corrected date
@@ -486,7 +552,9 @@ def process_single_pdf(
     # Standardize exam types
     if all_exams:
         raw_names = list(set(exam.get("exam_name_raw", "") for exam in all_exams))
-        standardized = standardize_exam_types(raw_names, config.extract_model_id, client)
+        standardized = standardize_exam_types(
+            raw_names, config.extract_model_id, client
+        )
 
         for exam in all_exams:
             raw_name = exam.get("exam_name_raw", "")
@@ -502,7 +570,9 @@ def process_single_pdf(
 
         # Generate document-level summary
         document_summary = summarize_document(
-            all_exams, config.summarize_model_id, client,
+            all_exams,
+            config.summarize_model_id,
+            client,
             max_input_tokens=config.summarize_max_input_tokens,
         )
         save_document_summary(document_summary, doc_output_dir, doc_stem, all_exams)
@@ -530,12 +600,14 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
                 frontmatter = yaml.safe_load(frontmatter_str) or {}
             except yaml.YAMLError:
                 pass
-            transcription = transcription[end_marker + 3:].strip()
+            transcription = transcription[end_marker + 3 :].strip()
 
     return frontmatter, transcription
 
 
-def frontmatter_to_exam(frontmatter: dict, transcription: str, page_num: int, source_file: str = None) -> dict:
+def frontmatter_to_exam(
+    frontmatter: dict, transcription: str, page_num: int, source_file: str = None
+) -> dict:
     """
     Convert frontmatter fields to internal exam dict format.
 
@@ -562,11 +634,17 @@ def frontmatter_to_exam(frontmatter: dict, transcription: str, page_num: int, so
         "transcription_confidence": frontmatter.get("confidence"),
         "transcription": transcription,
         "page_number": frontmatter.get("page") or page_num,
-        "source_file": frontmatter.get("source") or source_file
+        "source_file": frontmatter.get("source") or source_file,
     }
 
 
-def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: OpenAI, input_path: Path | None = None, doc_filter: str | None = None):
+def regenerate_summaries(
+    output_path: Path,
+    config: ExtractionConfig,
+    client: OpenAI,
+    input_path: Path | None = None,
+    doc_filter: str | None = None,
+):
     """
     Regenerate document-level summary files from existing transcription (.md) files.
 
@@ -580,8 +658,12 @@ def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: Op
     # Apply document filter if specified
     if doc_filter:
         query = doc_filter.lower()
-        query_stem = query[:-4] if query.endswith('.pdf') else query
-        doc_dirs = [d for d in doc_dirs if d.name.lower() == query_stem or d.name.lower() == query]
+        query_stem = query[:-4] if query.endswith(".pdf") else query
+        doc_dirs = [
+            d
+            for d in doc_dirs
+            if d.name.lower() == query_stem or d.name.lower() == query
+        ]
         if not doc_dirs:
             logger.error(f"No matching document directory found for: {doc_filter}")
             return 0
@@ -595,7 +677,8 @@ def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: Op
         # Page completeness check: compare .jpg count to .md transcription count
         jpg_files = list(doc_dir.glob(f"{doc_stem}.*.jpg"))
         md_transcription_files = [
-            f for f in doc_dir.glob(f"{doc_stem}.*.md")
+            f
+            for f in doc_dir.glob(f"{doc_stem}.*.md")
             if not f.name.endswith(".summary.md")
         ]
         if jpg_files and len(jpg_files) != len(md_transcription_files):
@@ -616,13 +699,18 @@ def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: Op
                         shutil.copy2(source_pdfs[0], doc_dir / source_pdfs[0].name)
                         logger.info(f"Copied source PDF: {source_pdfs[0].name}")
                     except PermissionError:
-                        logger.warning(f"Could not copy PDF (permission denied): {source_pdfs[0].name}")
+                        logger.warning(
+                            f"Could not copy PDF (permission denied): {source_pdfs[0].name}"
+                        )
 
         # Find all transcription .md files (exclude .summary.md)
-        md_files = sorted([
-            f for f in doc_dir.glob(f"{doc_stem}.*.md")
-            if not f.name.endswith(".summary.md")
-        ])
+        md_files = sorted(
+            [
+                f
+                for f in doc_dir.glob(f"{doc_stem}.*.md")
+                if not f.name.endswith(".summary.md")
+            ]
+        )
         if not md_files:
             logger.warning(f"No transcription files found in {doc_dir}")
             continue
@@ -641,13 +729,15 @@ def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: Op
                 continue
 
             # Read and parse the markdown file
-            with open(md_path, 'r', encoding='utf-8') as f:
+            with open(md_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
             frontmatter, transcription = parse_frontmatter(content)
 
             # Convert frontmatter to exam dict (use doc_stem.pdf as fallback source)
-            exam = frontmatter_to_exam(frontmatter, transcription, page_num, f"{doc_stem}.pdf")
+            exam = frontmatter_to_exam(
+                frontmatter, transcription, page_num, f"{doc_stem}.pdf"
+            )
             all_exams.append(exam)
 
         if not all_exams:
@@ -660,7 +750,9 @@ def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: Op
 
         # Generate document-level summary
         document_summary = summarize_document(
-            all_exams, config.summarize_model_id, client,
+            all_exams,
+            config.summarize_model_id,
+            client,
             max_input_tokens=config.summarize_max_input_tokens,
         )
 
@@ -673,10 +765,7 @@ def regenerate_summaries(output_path: Path, config: ExtractionConfig, client: Op
     return total_exams
 
 
-def validate_pipeline_outputs(
-    pdf_files: list[Path],
-    output_path: Path
-) -> list[str]:
+def validate_pipeline_outputs(pdf_files: list[Path], output_path: Path) -> list[str]:
     """
     Validate that all expected output files exist for each source PDF.
 
@@ -746,7 +835,7 @@ def validate_frontmatter(output_path: Path) -> list[str]:
 
         for md_path in md_files:
             try:
-                with open(md_path, 'r', encoding='utf-8') as f:
+                with open(md_path, "r", encoding="utf-8") as f:
                     content = f.read()
 
                 # Check for frontmatter
@@ -797,64 +886,65 @@ Examples:
   python main.py -p tsilva --reprocess-all     # Force reprocess all documents
   python main.py -p tsilva -d exam.pdf         # Reprocess specific document
   python main.py -p tsilva -d exam.pdf --page 2  # Reprocess specific page
-        """
+  python main.py -p tsilva --dry-run           # Preview what would be processed
+        """,
     )
     parser.add_argument(
-        "--profile", "-p",
-        type=str,
-        help="Profile name (without extension)"
+        "--profile", "-p", type=str, help="Profile name (without extension)"
     )
     parser.add_argument(
-        "--list-profiles",
-        action="store_true",
-        help="List available profiles and exit"
+        "--list-profiles", action="store_true", help="List available profiles and exit"
     )
     parser.add_argument(
         "--regenerate",
         action="store_true",
-        help="Regenerate summaries from existing transcription files"
+        help="Regenerate summaries from existing transcription files",
     )
     parser.add_argument(
         "--resummarize",
         action="store_true",
-        help="Regenerate summaries only (use with -d to target a specific document)"
+        help="Regenerate summaries only (use with -d to target a specific document)",
     )
     parser.add_argument(
         "--reprocess-all",
         action="store_true",
-        help="Force reprocessing of all documents (ignores already processed)"
+        help="Force reprocessing of all documents (ignores already processed)",
     )
     parser.add_argument(
-        "--document", "-d",
+        "--document",
+        "-d",
         type=str,
-        help="Process only this document (filename or stem). Forces reprocessing."
+        help="Process only this document (filename or stem). Forces reprocessing.",
     )
     parser.add_argument(
-        "--page",
-        type=int,
-        help="Process only this page number (requires --document)"
+        "--page", type=int, help="Process only this page number (requires --document)"
     )
 
     # Override arguments
     parser.add_argument(
-        "--model", "-m",
+        "--model",
+        "-m",
         type=str,
-        help="Model ID for extraction (overrides profile/env)"
+        help="Model ID for extraction (overrides profile/env)",
     )
     parser.add_argument(
-        "--workers", "-w",
+        "--workers",
+        "-w",
         type=int,
-        help="Number of parallel workers (overrides profile/env)"
+        help="Number of parallel workers (overrides profile/env)",
     )
     parser.add_argument(
-        "--pattern",
-        type=str,
-        help="Regex pattern for input files (overrides profile)"
+        "--pattern", type=str, help="Regex pattern for input files (overrides profile)"
     )
     parser.add_argument(
         "--env",
         type=str,
-        help="Environment name to load (loads .env.{name} instead of .env)"
+        help="Environment name to load (loads .env.{name} instead of .env)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Simulate the pipeline without making LLM calls or writing files. Reports what would be processed.",
     )
     return parser.parse_args()
 
@@ -872,7 +962,7 @@ def run_profile(profile_name: str, args) -> bool:
     """
     # Load profile
     profile_path = None
-    for ext in ('.yaml', '.yml', '.json'):
+    for ext in (".yaml", ".yml", ".json"):
         p = Path(f"profiles/{profile_name}{ext}")
         if p.exists():
             profile_path = p
@@ -906,7 +996,9 @@ def run_profile(profile_name: str, args) -> bool:
     # Apply profile paths to config
     config.input_path = profile.input_path
     config.output_path = profile.output_path
-    config.input_file_regex = profile.input_file_regex or config.input_file_regex or ".*\\.pdf"
+    config.input_file_regex = (
+        profile.input_file_regex or config.input_file_regex or ".*\\.pdf"
+    )
 
     # Apply profile overrides
     if profile.model:
@@ -925,14 +1017,22 @@ def run_profile(profile_name: str, args) -> bool:
         config.max_workers = args.workers
     if args.pattern:
         config.input_file_regex = args.pattern
+    config.dry_run = args.dry_run
 
     # Setup logging
     log_dir = config.output_path / "logs"
     setup_logging(log_dir, clear_logs=True)
 
-    logger.info("=" * 60)
-    logger.info("Medical Exams Parser - Starting Pipeline")
-    logger.info("=" * 60)
+    if config.dry_run:
+        logger.info("=" * 60)
+        logger.info("Medical Exams Parser - DRY RUN MODE")
+        logger.info("=" * 60)
+        logger.info("No LLM calls will be made. No files will be written.")
+        logger.info("=" * 60)
+    else:
+        logger.info("=" * 60)
+        logger.info("Medical Exams Parser - Starting Pipeline")
+        logger.info("=" * 60)
     logger.info(f"Profile: {profile.name}")
     logger.info(f"Input path: {config.input_path}")
     logger.info(f"Output path: {config.output_path}")
@@ -943,8 +1043,7 @@ def run_profile(profile_name: str, args) -> bool:
 
     # Initialize OpenAI client
     client = OpenAI(
-        base_url=config.openrouter_base_url,
-        api_key=config.openrouter_api_key
+        base_url=config.openrouter_base_url, api_key=config.openrouter_api_key
     )
 
     # Build profile context for extraction prompt
@@ -955,20 +1054,26 @@ def run_profile(profile_name: str, args) -> bool:
             parts.append(f"Patient name: {profile.full_name}")
         if profile.birth_date:
             parts.append(f"Patient date of birth: {profile.birth_date}")
-            parts.append(f"IMPORTANT: {profile.birth_date} is the patient's birth date — NEVER use it as exam_date")
+            parts.append(
+                f"IMPORTANT: {profile.birth_date} is the patient's birth date — NEVER use it as exam_date"
+            )
         if profile.locale:
-            parts.append(f"Locale: {profile.locale} (dates in documents typically use DD/MM/YYYY format)")
+            parts.append(
+                f"Locale: {profile.locale} (dates in documents typically use DD/MM/YYYY format)"
+            )
         profile_context = "PATIENT CONTEXT:\n" + "\n".join(parts)
         logger.info(f"Profile context injected into extraction prompt")
 
     # Handle --resummarize mode
     if args.resummarize:
-        doc_filter = args.document if hasattr(args, 'document') else None
+        doc_filter = args.document if hasattr(args, "document") else None
         if doc_filter:
             logger.info(f"Resummarize mode: regenerating summary for {doc_filter}")
         else:
             logger.info("Resummarize mode: regenerating all summaries")
-        total_exams = regenerate_summaries(config.output_path, config, client, config.input_path, doc_filter=doc_filter)
+        total_exams = regenerate_summaries(
+            config.output_path, config, client, config.input_path, doc_filter=doc_filter
+        )
         logger.info("=" * 60)
         logger.info("Resummarize Complete")
         logger.info("=" * 60)
@@ -977,8 +1082,12 @@ def run_profile(profile_name: str, args) -> bool:
 
     # Handle --regenerate mode
     if args.regenerate:
-        logger.info("Regeneration mode: re-summarizing from existing transcription files")
-        total_exams = regenerate_summaries(config.output_path, config, client, config.input_path)
+        logger.info(
+            "Regeneration mode: re-summarizing from existing transcription files"
+        )
+        total_exams = regenerate_summaries(
+            config.output_path, config, client, config.input_path
+        )
         logger.info("=" * 60)
         logger.info("Regeneration Complete")
         logger.info("=" * 60)
@@ -1001,10 +1110,9 @@ def run_profile(profile_name: str, args) -> bool:
 
     # Find PDF files
     pdf_pattern = re.compile(config.input_file_regex)
-    pdf_files = sorted([
-        f for f in config.input_path.glob("**/*.pdf")
-        if pdf_pattern.match(f.name)
-    ])
+    pdf_files = sorted(
+        [f for f in config.input_path.glob("**/*.pdf") if pdf_pattern.match(f.name)]
+    )
 
     logger.info(f"Found {len(pdf_files)} PDF files matching pattern")
 
@@ -1013,19 +1121,24 @@ def run_profile(profile_name: str, args) -> bool:
         return True
 
     # Select documents to process
+    already_processed = 0  # Initialize for dry run stats
     if args.document:
         # Find the specific document (by filename or stem, case-insensitive)
         doc_query = args.document.lower()
         # Strip .pdf extension if present for stem matching
-        doc_query_stem = doc_query[:-4] if doc_query.endswith('.pdf') else doc_query
-        matches = [f for f in pdf_files
-                   if f.name.lower() == doc_query
-                   or f.stem.lower() == doc_query_stem]
+        doc_query_stem = doc_query[:-4] if doc_query.endswith(".pdf") else doc_query
+        matches = [
+            f
+            for f in pdf_files
+            if f.name.lower() == doc_query or f.stem.lower() == doc_query_stem
+        ]
         if not matches:
             logger.error(f"Document not found: {args.document}")
             return False
         if len(matches) > 1:
-            logger.error(f"Multiple matches for '{args.document}': {[m.name for m in matches]}")
+            logger.error(
+                f"Multiple matches for '{args.document}': {[m.name for m in matches]}"
+            )
             return False
         to_process = matches
         page_info = f" (page {args.page})" if args.page else ""
@@ -1037,7 +1150,6 @@ def run_profile(profile_name: str, args) -> bool:
     else:
         # Check for already processed files
         to_process = []
-        already_processed = 0
         for pdf_path in pdf_files:
             if is_document_processed(pdf_path, config.output_path):
                 logger.info(f"Skipping (already processed): {pdf_path.name}")
@@ -1045,7 +1157,9 @@ def run_profile(profile_name: str, args) -> bool:
             else:
                 to_process.append(pdf_path)
 
-        logger.info(f"Processing {len(to_process)} new PDFs, {already_processed} already processed")
+        logger.info(
+            f"Processing {len(to_process)} new PDFs, {already_processed} already processed"
+        )
 
     # Process PDFs (sequential for now to avoid rate limits)
     total_pages = 0
@@ -1056,11 +1170,14 @@ def run_profile(profile_name: str, args) -> bool:
     for pdf_path in tqdm(to_process, desc="Processing PDFs"):
         try:
             result = process_single_pdf(
-                pdf_path, config.output_path, config, client,
+                pdf_path,
+                config.output_path,
+                config,
+                client,
                 page_filter=args.page,
                 profile_context=profile_context,
                 birth_date=profile.birth_date,
-                force_regenerate_images=bool(args.document)
+                force_regenerate_images=bool(args.document),
             )
             if result == "skipped":
                 skipped_documents.append(pdf_path.name)
@@ -1074,10 +1191,32 @@ def run_profile(profile_name: str, args) -> bool:
             failed_count += 1
 
     # Summary
+    if config.dry_run:
+        logger.info("=" * 60)
+        logger.info("DRY RUN COMPLETE - No changes made")
+        logger.info("=" * 60)
+        logger.info(
+            f"Would process: {len(processed_documents)} documents ({total_pages} pages)"
+        )
+        logger.info(f"Would skip (already processed): {already_processed} documents")
+        logger.info(
+            f"Would generate: {total_pages} .md files, {len(processed_documents)} summaries"
+        )
+        if skipped_documents:
+            logger.info(
+                f"Would classify as non-exam: {len(skipped_documents)} documents"
+            )
+        if failed_count > 0:
+            logger.warning(f"Would fail: {failed_count} documents")
+        logger.info("=" * 60)
+        return True
+
     logger.info("=" * 60)
     logger.info("Pipeline Complete")
     logger.info("=" * 60)
-    logger.info(f"Processed: {len(processed_documents)} documents ({total_pages} pages)")
+    logger.info(
+        f"Processed: {len(processed_documents)} documents ({total_pages} pages)"
+    )
     logger.info(f"Skipped (not medical exams): {len(skipped_documents)}")
     if failed_count > 0:
         logger.warning(f"Failed: {failed_count}")
@@ -1154,7 +1293,9 @@ def main():
             print("No profiles found in profiles/ directory")
             print("Use --list-profiles to see available profiles or create a profile.")
             sys.exit(1)
-        print(f"Running all {len(profiles_to_run)} profiles: {', '.join(profiles_to_run)}")
+        print(
+            f"Running all {len(profiles_to_run)} profiles: {', '.join(profiles_to_run)}"
+        )
 
     # Run each profile
     success_count = 0

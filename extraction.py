@@ -21,13 +21,13 @@ logger = logging.getLogger(__name__)
 # Pydantic Models
 # ========================================
 
+
 class MedicalExam(BaseModel):
     """Single medical exam extraction result."""
 
     # Raw extraction fields
     exam_date: Optional[str] = Field(
-        default=None,
-        description="Exam date in YYYY-MM-DD format"
+        default=None, description="Exam date in YYYY-MM-DD format"
     )
     exam_name_raw: str = Field(
         description="Document title EXACTLY as shown (e.g., 'Radiografia do Tórax', 'Ecografia Abdominal', 'Estudo do Sono (Questionário de Hábitos)')"
@@ -39,38 +39,40 @@ class MedicalExam(BaseModel):
     # Internal fields (added by pipeline, not by LLM)
     exam_type: Optional[str] = Field(
         default=None,
-        description="Standardized category: imaging, ultrasound, endoscopy, other"
+        description="Standardized category: imaging, ultrasound, endoscopy, other",
     )
     exam_name_standardized: Optional[str] = Field(
         default=None,
-        description="Standardized exam name (e.g., 'Chest X-ray', 'Abdominal Ultrasound')"
+        description="Standardized exam name (e.g., 'Chest X-ray', 'Abdominal Ultrasound')",
     )
     summary: Optional[str] = Field(
         default=None,
-        description="Aggressive summary: ONLY findings, impressions, recommendations"
+        description="Aggressive summary: ONLY findings, impressions, recommendations",
     )
-    page_number: Optional[int] = Field(default=None, ge=1, description="Page number in PDF")
-    source_file: Optional[str] = Field(default=None, description="Source file identifier")
+    page_number: Optional[int] = Field(
+        default=None, ge=1, description="Page number in PDF"
+    )
+    source_file: Optional[str] = Field(
+        default=None, description="Source file identifier"
+    )
 
 
 class MedicalExamReport(BaseModel):
     """Document-level medical exam report."""
 
     report_date: Optional[str] = Field(
-        default=None,
-        description="Report issue date in YYYY-MM-DD format"
+        default=None, description="Report issue date in YYYY-MM-DD format"
     )
     facility_name: Optional[str] = Field(
-        default=None,
-        description="Healthcare facility name"
+        default=None, description="Healthcare facility name"
     )
     page_has_exam_data: Optional[bool] = Field(
         default=None,
-        description="True if page contains medical content (exam results, questionnaire responses, test data). False only for blank pages or administrative headers."
+        description="True if page contains medical content (exam results, questionnaire responses, test data). False only for blank pages or administrative headers.",
     )
     exams: List[MedicalExam] = Field(
         default_factory=list,
-        description="List of medical documents extracted from this page. Include exam reports, questionnaires, and any medical forms with content."
+        description="List of medical documents extracted from this page. Include exam reports, questionnaires, and any medical forms with content.",
     )
     source_file: Optional[str] = Field(default=None, description="Source PDF filename")
 
@@ -100,23 +102,22 @@ class DocumentClassification(BaseModel):
     )
     exam_name_raw: Optional[str] = Field(
         default=None,
-        description="Document title or exam name exactly as written (e.g., 'CABELO: NUTRIENTES E METAIS TÓXICOS')"
+        description="Document title or exam name exactly as written (e.g., 'CABELO: NUTRIENTES E METAIS TÓXICOS')",
     )
     exam_date: Optional[str] = Field(
-        default=None,
-        description="Exam date in YYYY-MM-DD format"
+        default=None, description="Exam date in YYYY-MM-DD format"
     )
     facility_name: Optional[str] = Field(
         default=None,
-        description="Healthcare facility name (e.g., 'SYNLAB', 'Hospital Santo António')"
+        description="Healthcare facility name (e.g., 'SYNLAB', 'Hospital Santo António')",
     )
     physician_name: Optional[str] = Field(
         default=None,
-        description="Name of the physician/doctor who performed or signed the exam"
+        description="Name of the physician/doctor who performed or signed the exam",
     )
     department: Optional[str] = Field(
         default=None,
-        description="Department or service within the facility (e.g., 'Radiologia', 'Cardiologia')"
+        description="Department or service within the facility (e.g., 'Radiologia', 'Cardiologia')",
     )
 
 
@@ -127,8 +128,8 @@ TOOLS = [
         "function": {
             "name": "extract_medical_documents",
             "description": "Extracts and transcribes ALL content from medical document images including: exam reports, clinical notes, discharge summaries, administrative letters, cover pages, correspondence, and any other medical documentation. Must be called for ANY page with readable text.",
-            "parameters": MedicalExamReport.model_json_schema()
-        }
+            "parameters": MedicalExamReport.model_json_schema(),
+        },
     }
 ]
 
@@ -138,18 +139,16 @@ CLASSIFICATION_TOOLS = [
         "function": {
             "name": "classify_document",
             "description": "Classifies whether a document contains medical exam results, clinical reports, or other medical content that should be transcribed.",
-            "parameters": DocumentClassification.model_json_schema()
-        }
+            "parameters": DocumentClassification.model_json_schema(),
+        },
     }
 ]
-
-
-
 
 
 # ========================================
 # Self-Consistency
 # ========================================
+
 
 def self_consistency(fn, model_id, n, *args, base_url=None, api_key=None, **kwargs):
     """
@@ -178,8 +177,8 @@ def self_consistency(fn, model_id, n, *args, base_url=None, api_key=None, **kwar
         for i in range(n):
             effective_kwargs = kwargs.copy()
             # Use fixed temperature if function accepts it and not already set
-            if 'temperature' in fn.__code__.co_varnames and 'temperature' not in kwargs:
-                effective_kwargs['temperature'] = SELF_CONSISTENCY_TEMPERATURE
+            if "temperature" in fn.__code__.co_varnames and "temperature" not in kwargs:
+                effective_kwargs["temperature"] = SELF_CONSISTENCY_TEMPERATURE
             futures.append(executor.submit(fn, *args, **effective_kwargs))
 
         for future in as_completed(futures):
@@ -200,23 +199,34 @@ def self_consistency(fn, model_id, n, *args, base_url=None, api_key=None, **kwar
         return results[0], results
 
     # Vote on best result using LLM
-    return vote_on_best_result(results, model_id, fn.__name__, base_url=base_url, api_key=api_key)
+    return vote_on_best_result(
+        results, model_id, fn.__name__, base_url=base_url, api_key=api_key
+    )
 
 
-def vote_on_best_result(results: list, model_id: str, fn_name: str, base_url: str = None, api_key: str = None):
+def vote_on_best_result(
+    results: list,
+    model_id: str,
+    fn_name: str,
+    base_url: str = None,
+    api_key: str = None,
+):
     """Use LLM to vote on the most consistent result."""
     from openai import OpenAI
     import os
 
     client = OpenAI(
-        base_url=base_url or resolve_base_url(os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")),
-        api_key=api_key or os.getenv("OPENROUTER_API_KEY")
+        base_url=base_url
+        or resolve_base_url(
+            os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+        ),
+        api_key=api_key or os.getenv("OPENROUTER_API_KEY"),
     )
 
     system_prompt = load_prompt("voting_system")
 
     prompt = "".join(
-        f"--- Output {i+1} ---\n{json.dumps(v, ensure_ascii=False) if type(v) in [list, dict] else v}\n\n"
+        f"--- Output {i + 1} ---\n{json.dumps(v, ensure_ascii=False) if type(v) in [list, dict] else v}\n\n"
         for i, v in enumerate(results)
     )
 
@@ -227,12 +237,12 @@ def vote_on_best_result(results: list, model_id: str, fn_name: str, base_url: st
             temperature=0.1,  # Low temperature for deterministic voting
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ]
+                {"role": "user", "content": prompt},
+            ],
         )
         voted_raw = completion.choices[0].message.content.strip()
 
-        if fn_name == 'extract_exams_from_page_image':
+        if fn_name == "extract_exams_from_page_image":
             voted_result = parse_llm_json_response(voted_raw, fallback=None)
             if voted_result:
                 return voted_result, results
@@ -251,12 +261,13 @@ def vote_on_best_result(results: list, model_id: str, fn_name: str, base_url: st
 # Extraction Function
 # ========================================
 
+
 def extract_exams_from_page_image(
     image_path: Path,
     model_id: str,
     client: OpenAI,
     temperature: float = 0.3,
-    profile_context: str = ""
+    profile_context: str = "",
 ) -> dict:
     """
     Extract medical exams from a page image using vision model.
@@ -282,15 +293,24 @@ def extract_exams_from_page_image(
             model=model_id,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": [
-                    {"type": "text", "text": user_prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_data}"}}
-                ]}
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{img_data}"},
+                        },
+                    ],
+                },
             ],
             temperature=temperature,
             max_tokens=16384,
             tools=TOOLS,
-            tool_choice={"type": "function", "function": {"name": "extract_medical_documents"}}
+            tool_choice={
+                "type": "function",
+                "function": {"name": "extract_medical_documents"},
+            },
         )
     except APIError as e:
         logger.error(f"API Error during exam extraction from {image_path.name}: {e}")
@@ -299,18 +319,20 @@ def extract_exams_from_page_image(
     # Check for valid response structure
     if not completion or not completion.choices or len(completion.choices) == 0:
         logger.error(f"Invalid completion response structure")
-        return MedicalExamReport(exams=[]).model_dump(mode='json')
+        return MedicalExamReport(exams=[]).model_dump(mode="json")
 
     if not completion.choices[0].message.tool_calls:
-        logger.warning(f"No tool call by model for exam extraction from {image_path.name}")
-        return MedicalExamReport(exams=[]).model_dump(mode='json')
+        logger.warning(
+            f"No tool call by model for exam extraction from {image_path.name}"
+        )
+        return MedicalExamReport(exams=[]).model_dump(mode="json")
 
     tool_args_raw = completion.choices[0].message.tool_calls[0].function.arguments
     try:
         tool_result_dict = json.loads(tool_args_raw)
     except json.JSONDecodeError as e:
         logger.error(f"JSON decode error for tool args: {e}")
-        return MedicalExamReport(exams=[]).model_dump(mode='json')
+        return MedicalExamReport(exams=[]).model_dump(mode="json")
 
     # Fix date formats
     tool_result_dict = _fix_date_formats(tool_result_dict)
@@ -322,7 +344,11 @@ def extract_exams_from_page_image(
 
         # Check for extraction quality
         if report_model.exams:
-            empty_count = sum(1 for e in report_model.exams if not e.transcription or len(e.transcription.strip()) < 50)
+            empty_count = sum(
+                1
+                for e in report_model.exams
+                if not e.transcription or len(e.transcription.strip()) < 50
+            )
             total_count = len(report_model.exams)
 
             if empty_count > 0:
@@ -341,11 +367,11 @@ def extract_exams_from_page_image(
                     f"\t- {image_path}"
                 )
 
-        return report_model.model_dump(mode='json')
+        return report_model.model_dump(mode="json")
     except Exception as e:
         num_exams = len(tool_result_dict.get("exams", []))
         logger.error(f"Model validation error for report with {num_exams} exams: {e}")
-        return MedicalExamReport(exams=[]).model_dump(mode='json')
+        return MedicalExamReport(exams=[]).model_dump(mode="json")
 
 
 def classify_document(
@@ -353,7 +379,7 @@ def classify_document(
     model_id: str,
     client: OpenAI,
     temperature: float = 0.1,
-    profile_context: str = ""
+    profile_context: str = "",
 ) -> DocumentClassification:
     """
     Classify whether a document is a medical exam by analyzing all pages.
@@ -372,10 +398,12 @@ def classify_document(
     for image_path in image_paths:
         with open(image_path, "rb") as img_file:
             img_data = base64.standard_b64encode(img_file.read()).decode("utf-8")
-        image_content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{img_data}"}
-        })
+        image_content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{img_data}"},
+            }
+        )
 
     system_prompt = load_prompt("classification_system")
     system_prompt = system_prompt.format(patient_context=profile_context)
@@ -386,15 +414,15 @@ def classify_document(
             model=model_id,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": [
-                    {"type": "text", "text": user_prompt},
-                    *image_content
-                ]}
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": user_prompt}, *image_content],
+                },
             ],
             temperature=temperature,
             max_tokens=1024,
             tools=CLASSIFICATION_TOOLS,
-            tool_choice={"type": "function", "function": {"name": "classify_document"}}
+            tool_choice={"type": "function", "function": {"name": "classify_document"}},
         )
     except APIError as e:
         logger.error(f"API Error during document classification: {e}")
@@ -418,7 +446,9 @@ def classify_document(
 
     # Normalize date format
     if tool_result_dict.get("exam_date"):
-        tool_result_dict["exam_date"] = _normalize_date_format(tool_result_dict["exam_date"])
+        tool_result_dict["exam_date"] = _normalize_date_format(
+            tool_result_dict["exam_date"]
+        )
 
     try:
         return DocumentClassification(**tool_result_dict)
@@ -428,10 +458,7 @@ def classify_document(
 
 
 def transcribe_page(
-    image_path: Path,
-    model_id: str,
-    client: OpenAI,
-    temperature: float = 0.1
+    image_path: Path, model_id: str, client: OpenAI, temperature: float = 0.1
 ) -> str:
     """
     Transcribe all visible text from a page verbatim.
@@ -456,20 +483,28 @@ def transcribe_page(
             model=model_id,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": [
-                    {"type": "text", "text": user_prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_data}"}}
-                ]}
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{img_data}"},
+                        },
+                    ],
+                },
             ],
             temperature=temperature,
-            max_tokens=16384
+            max_tokens=16384,
         )
     except APIError as e:
         logger.error(f"API Error during page transcription from {image_path.name}: {e}")
         return ""
 
     if not completion or not completion.choices or len(completion.choices) == 0:
-        logger.error(f"Invalid completion response for transcription of {image_path.name}")
+        logger.error(
+            f"Invalid completion response for transcription of {image_path.name}"
+        )
         return ""
 
     content = completion.choices[0].message.content
@@ -502,30 +537,42 @@ def transcribe_page(
     return content
 
 
-def _load_refusal_phrases() -> list[str]:
-    """Load refusal phrases from prompts/refusal_phrases.txt."""
-    phrases_path = Path(__file__).parent / "prompts" / "refusal_phrases.txt"
-    if not phrases_path.exists():
-        logger.warning(f"Refusal phrases file not found: {phrases_path}")
-        return []
-    return [line.strip() for line in phrases_path.read_text().splitlines() if line.strip()]
-
-
 def validate_transcription(
-    transcription: str,
-    model_id: str,
-    client: OpenAI
+    transcription: str, model_id: str, client: OpenAI
 ) -> tuple[bool, str]:
-    """Returns (is_valid, reason). Quick heuristic check for transcription quality."""
+    """Returns (is_valid, reason). Uses LLM to check if transcription is a refusal."""
     # Empty or too short
     if not transcription or len(transcription.strip()) < 20:
         return (False, "empty")
 
-    # Refusal phrases
-    lower = transcription.strip().lower()
-    for phrase in _load_refusal_phrases():
-        if phrase in lower:
+    # Use LLM to detect refusal
+    prompt = (
+        """You are checking if the following text is a refusal to transcribe medical content.
+
+A refusal would be text where the model says it cannot or will not transcribe the medical document, mentions privacy concerns, or declines to process the request.
+
+Text to check:
+"""
+        + transcription
+        + """
+
+Is this a refusal to transcribe medical content? Reply with only "yes" or "no"."""
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model=model_id,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=10,
+        )
+        result = response.choices[0].message.content.strip().lower()
+        if "yes" in result:
             return (False, "refusal")
+    except Exception as e:
+        logger.warning(f"Failed to check for refusal with LLM: {e}")
+        # If LLM check fails, assume valid to avoid blocking
+        pass
 
     return (True, "ok")
 
@@ -572,9 +619,9 @@ def _fix_malformed_json_string(text: str) -> str:
         content = match.group(1)
         # Escape any unescaped quotes (but not the ones that are already escaped)
         # Replace " with \" unless preceded by \
-        fixed = re.sub(r'(?<!\\)"', r'\"', content)
+        fixed = re.sub(r'(?<!\\)"', r"\"", content)
         # Escape literal newlines
-        fixed = fixed.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+        fixed = fixed.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
         return f'"transcription": "{fixed}"'
 
     # Try to fix the transcription field specifically
@@ -582,7 +629,7 @@ def _fix_malformed_json_string(text: str) -> str:
         r'"transcription":\s*"((?:[^"\\]|\\.)*)(?="[,}]|\Z)',
         fix_transcription_value,
         text,
-        flags=re.DOTALL
+        flags=re.DOTALL,
     )
 
     # If regex didn't help, fall back to character-by-character approach
@@ -597,26 +644,26 @@ def _fix_malformed_json_string(text: str) -> str:
                 if not in_string:
                     in_string = True
                     result.append(char)
-                elif i + 1 < len(text) and text[i + 1] in ',}]:':
+                elif i + 1 < len(text) and text[i + 1] in ",}]:":
                     # This quote ends a string (followed by JSON structure)
                     in_string = False
                     result.append(char)
-                elif i > 0 and text[i - 1] == '\\':
+                elif i > 0 and text[i - 1] == "\\":
                     # Already escaped
                     result.append(char)
                 else:
                     # Unescaped quote inside string - escape it
                     result.append('\\"')
-            elif char == '\n' and in_string:
-                result.append('\\n')
-            elif char == '\r' and in_string:
-                result.append('\\r')
-            elif char == '\t' and in_string:
-                result.append('\\t')
+            elif char == "\n" and in_string:
+                result.append("\\n")
+            elif char == "\r" and in_string:
+                result.append("\\r")
+            elif char == "\t" and in_string:
+                result.append("\\t")
             else:
                 result.append(char)
             i += 1
-        fixed = ''.join(result)
+        fixed = "".join(result)
 
     return fixed
 
@@ -626,35 +673,35 @@ def _parse_yaml_like_exam(text: str) -> Optional[dict]:
     Parse YAML-like exam string that Gemini sometimes returns.
     Format: "key: value\nkey: value\n..."
     """
-    if not text or ':' not in text:
+    if not text or ":" not in text:
         return None
 
     result = {}
-    lines = text.split('\n')
+    lines = text.split("\n")
     current_key = None
     current_value_lines = []
 
     for line in lines:
         # Check if this line starts a new key
-        if ': ' in line and not line.startswith(' '):
+        if ": " in line and not line.startswith(" "):
             # Save previous key-value pair
             if current_key:
-                result[current_key] = '\n'.join(current_value_lines).strip()
+                result[current_key] = "\n".join(current_value_lines).strip()
 
             # Parse new key-value
-            colon_idx = line.index(': ')
+            colon_idx = line.index(": ")
             current_key = line[:colon_idx].strip()
-            current_value_lines = [line[colon_idx + 2:]]
+            current_value_lines = [line[colon_idx + 2 :]]
         elif current_key:
             # Continuation of multi-line value
             current_value_lines.append(line)
 
     # Save last key-value pair
     if current_key:
-        result[current_key] = '\n'.join(current_value_lines).strip()
+        result[current_key] = "\n".join(current_value_lines).strip()
 
     # Validate required fields
-    if 'exam_name_raw' in result and 'transcription' in result:
+    if "exam_name_raw" in result and "transcription" in result:
         return result
 
     return None
@@ -664,7 +711,7 @@ def score_transcription_confidence(
     merged_transcription: str,
     original_transcriptions: list[str],
     model_id: str,
-    client: OpenAI
+    client: OpenAI,
 ) -> float:
     """
     Use LLM to assess confidence by comparing merged transcription against originals.
@@ -697,8 +744,8 @@ def score_transcription_confidence(
             temperature=0.1,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
+                {"role": "user", "content": user_prompt},
+            ],
         )
         response = completion.choices[0].message.content.strip()
 
@@ -721,7 +768,9 @@ def _fix_date_formats(tool_result_dict: dict) -> dict:
     """Fix common date formatting issues and handle malformed exam entries."""
     # Fix date at report level
     if "report_date" in tool_result_dict:
-        tool_result_dict["report_date"] = _normalize_date_format(tool_result_dict["report_date"])
+        tool_result_dict["report_date"] = _normalize_date_format(
+            tool_result_dict["report_date"]
+        )
 
     # Fix dates in exams, also handle string exams (Gemini sometimes returns JSON strings instead of objects)
     if "exams" in tool_result_dict and isinstance(tool_result_dict["exams"], list):
@@ -743,15 +792,21 @@ def _fix_date_formats(tool_result_dict: dict) -> dict:
                 except json.JSONDecodeError:
                     # Try fixing malformed JSON (unescaped newlines, quotes)
                     try:
-                        fixed_str = _fix_malformed_json_string(exam)  # Use already-fixed string
+                        fixed_str = _fix_malformed_json_string(
+                            exam
+                        )  # Use already-fixed string
                         exam = json.loads(fixed_str)
                     except json.JSONDecodeError as e:
                         logger.debug(f"JSON decode error after fix: {e}")
                         # Try YAML-like format: "key: value\nkey: value"
                         exam = _parse_yaml_like_exam(original_str)
                         if exam is None:
-                            logger.warning(f"Failed to parse exam string: {original_str[:100]}...")
-                            logger.debug(f"Full exam string ({len(original_str)} chars): {original_str}")
+                            logger.warning(
+                                f"Failed to parse exam string: {original_str[:100]}..."
+                            )
+                            logger.debug(
+                                f"Full exam string ({len(original_str)} chars): {original_str}"
+                            )
                             continue
 
             # Fix date format
