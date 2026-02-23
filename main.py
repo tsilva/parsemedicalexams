@@ -48,49 +48,31 @@ def is_document_processed(pdf_path: Path, output_path: Path) -> bool:
     return len(md_files) > 0
 
 
-def save_transcription_file(
-    exams: list[dict], doc_output_dir: Path, doc_stem: str, page_num: int
-) -> None:
-    """
-    Save page transcription as markdown file with YAML frontmatter.
-    - .md = YAML frontmatter + raw transcription verbatim
-
-    Frontmatter includes all metadata (no separate JSON file needed).
-    """
-    md_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.md"
-
-    # Build frontmatter from first exam
+def build_exam_frontmatter(exam: dict, extra_fields: dict = None) -> dict:
+    """Build YAML frontmatter dict from an exam dict."""
     frontmatter = {}
-    if exams:
-        exam = exams[0]
-        if exam.get("exam_date"):
-            frontmatter["exam_date"] = exam["exam_date"]
-        if exam.get("exam_name_raw"):
-            frontmatter["exam_name_raw"] = exam["exam_name_raw"]
-        if exam.get("exam_name_standardized"):
-            frontmatter["title"] = exam["exam_name_standardized"]
-        if exam.get("exam_type"):
-            frontmatter["category"] = exam["exam_type"]
-        if exam.get("physician_name"):
-            frontmatter["doctor"] = exam["physician_name"]
-        if exam.get("facility_name"):
-            frontmatter["facility"] = exam["facility_name"]
-        if exam.get("department"):
-            frontmatter["department"] = exam["department"]
-        if exam.get("transcription_confidence") is not None:
-            frontmatter["confidence"] = exam["transcription_confidence"]
-        if exam.get("page_number"):
-            frontmatter["page"] = exam["page_number"]
-        if exam.get("source_file"):
-            frontmatter["source"] = exam["source_file"]
-        if exam.get("prompt_variant"):
-            frontmatter["prompt_variant"] = exam["prompt_variant"]
-        if exam.get("retry_attempts") and exam["retry_attempts"] > 1:
-            frontmatter["retry_attempts"] = exam["retry_attempts"]
+    if exam.get("exam_date"):
+        frontmatter["exam_date"] = exam["exam_date"]
+    if exam.get("exam_name_raw"):
+        frontmatter["exam_name_raw"] = exam["exam_name_raw"]
+    if exam.get("exam_name_standardized"):
+        frontmatter["title"] = exam["exam_name_standardized"]
+    if exam.get("exam_type"):
+        frontmatter["category"] = exam["exam_type"]
+    if exam.get("physician_name"):
+        frontmatter["doctor"] = exam["physician_name"]
+    if exam.get("facility_name"):
+        frontmatter["facility"] = exam["facility_name"]
+    if exam.get("department"):
+        frontmatter["department"] = exam["department"]
+    if extra_fields:
+        frontmatter.update(extra_fields)
+    return frontmatter
 
-    # Write file
-    transcriptions = [exam.get("transcription", "") for exam in exams]
-    with open(md_path, "w", encoding="utf-8") as f:
+
+def write_markdown_with_frontmatter(path: Path, frontmatter: dict, body: str) -> None:
+    """Write a markdown file with YAML frontmatter."""
+    with open(path, "w", encoding="utf-8") as f:
         if frontmatter:
             f.write("---\n")
             f.write(
@@ -102,7 +84,40 @@ def save_transcription_file(
                 )
             )
             f.write("---\n\n")
-        f.write("\n\n".join(transcriptions).strip() + "\n")
+        f.write(body)
+
+
+def save_transcription_file(
+    exams: list[dict], doc_output_dir: Path, doc_stem: str, page_num: int
+) -> None:
+    """
+    Save page transcription as markdown file with YAML frontmatter.
+    - .md = YAML frontmatter + raw transcription verbatim
+
+    Frontmatter includes all metadata (no separate JSON file needed).
+    """
+    md_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.md"
+
+    frontmatter = {}
+    if exams:
+        exam = exams[0]
+        extra = {}
+        if exam.get("transcription_confidence") is not None:
+            extra["confidence"] = exam["transcription_confidence"]
+        if exam.get("page_number"):
+            extra["page"] = exam["page_number"]
+        if exam.get("source_file"):
+            extra["source"] = exam["source_file"]
+        if exam.get("prompt_variant"):
+            extra["prompt_variant"] = exam["prompt_variant"]
+        if exam.get("retry_attempts") and exam["retry_attempts"] > 1:
+            extra["retry_attempts"] = exam["retry_attempts"]
+        frontmatter = build_exam_frontmatter(exam, extra)
+
+    transcriptions = [exam.get("transcription", "") for exam in exams]
+    write_markdown_with_frontmatter(
+        md_path, frontmatter, "\n\n".join(transcriptions).strip() + "\n"
+    )
 
 
 def save_document_summary(
@@ -114,39 +129,8 @@ def save_document_summary(
     """
     if summary:
         summary_path = doc_output_dir / f"{doc_stem}.summary.md"
-
-        # Build frontmatter from first exam
-        frontmatter = {}
-        if exams:
-            exam = exams[0]
-            if exam.get("exam_date"):
-                frontmatter["exam_date"] = exam["exam_date"]
-            if exam.get("exam_name_raw"):
-                frontmatter["exam_name_raw"] = exam["exam_name_raw"]
-            if exam.get("exam_name_standardized"):
-                frontmatter["title"] = exam["exam_name_standardized"]
-            if exam.get("exam_type"):
-                frontmatter["category"] = exam["exam_type"]
-            if exam.get("physician_name"):
-                frontmatter["doctor"] = exam["physician_name"]
-            if exam.get("facility_name"):
-                frontmatter["facility"] = exam["facility_name"]
-            if exam.get("department"):
-                frontmatter["department"] = exam["department"]
-
-        with open(summary_path, "w", encoding="utf-8") as f:
-            if frontmatter:
-                f.write("---\n")
-                f.write(
-                    yaml.dump(
-                        frontmatter,
-                        default_flow_style=False,
-                        allow_unicode=True,
-                        sort_keys=False,
-                    )
-                )
-                f.write("---\n\n")
-            f.write(summary.strip() + "\n")
+        frontmatter = build_exam_frontmatter(exams[0]) if exams else {}
+        write_markdown_with_frontmatter(summary_path, frontmatter, summary.strip() + "\n")
 
 
 def extract_date_from_filename(filename: str) -> str | None:
@@ -326,9 +310,6 @@ def process_single_pdf(
             return None
         logger.info(f"[DRY RUN] Would process {page_count} pages: {pdf_path.name}")
         return page_count
-
-    # NORMAL MODE: Continue with full processing
-    logger.info(f"Processing: {pdf_path.name}")
 
     # Check if we can reuse existing images from output directory
     doc_output_dir = output_path / doc_stem
