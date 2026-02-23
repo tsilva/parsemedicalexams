@@ -10,7 +10,7 @@ from PIL import Image, ImageEnhance
 from dotenv import load_dotenv
 
 # Prompts directory
-PROMPTS_DIR = Path(__file__).parent / "prompts"
+PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 
 def load_prompt(name: str) -> str:
@@ -23,7 +23,7 @@ def load_prompt(name: str) -> str:
 
 def preprocess_page_image(image: Image.Image) -> Image.Image:
     """Convert image to grayscale, resize, and enhance contrast."""
-    gray_image = image.convert('L')
+    gray_image = image.convert("L")
     MAX_LONG_SIDE = 1000
     long_side = max(gray_image.width, gray_image.height)
     if long_side > MAX_LONG_SIDE:
@@ -37,12 +37,12 @@ def preprocess_page_image(image: Image.Image) -> Image.Image:
 def strip_markdown_fences(text: str) -> str:
     """Remove markdown code fences from text."""
     if text.startswith("```"):
-        lines = text.split('\n')
+        lines = text.split("\n")
         if lines[0].startswith("```"):
             lines = lines[1:]
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
-        text = '\n'.join(lines).strip()
+        text = "\n".join(lines).strip()
     return text
 
 
@@ -131,15 +131,15 @@ def setup_logging(log_dir: Path, clear_logs: bool = False) -> logging.Logger:
         handler.close()
 
     # Formatters
-    file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    console_formatter = logging.Formatter('%(levelname)s: %(message)s')
+    file_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    console_formatter = logging.Formatter("%(levelname)s: %(message)s")
 
     # File handlers
-    info_handler = logging.FileHandler(info_log_path, encoding='utf-8')
+    info_handler = logging.FileHandler(info_log_path, encoding="utf-8")
     info_handler.setLevel(logging.INFO)
     info_handler.setFormatter(file_formatter)
 
-    error_handler = logging.FileHandler(error_log_path, encoding='utf-8')
+    error_handler = logging.FileHandler(error_log_path, encoding="utf-8")
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(file_formatter)
 

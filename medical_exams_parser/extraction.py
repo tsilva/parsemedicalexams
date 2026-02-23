@@ -36,9 +36,7 @@ class DocumentClassification(BaseModel):
         default=None,
         description="Document title or exam name exactly as written (e.g., 'CABELO: NUTRIENTES E METAIS TÓXICOS')",
     )
-    exam_date: Optional[str] = Field(
-        default=None, description="Exam date in YYYY-MM-DD format"
-    )
+    exam_date: Optional[str] = Field(default=None, description="Exam date in YYYY-MM-DD format")
     facility_name: Optional[str] = Field(
         default=None,
         description="Healthcare facility name (e.g., 'SYNLAB', 'Hospital Santo António')",
@@ -196,9 +194,7 @@ def classify_document(
         tool_args_raw = completion.choices[0].message.tool_calls[0].function.arguments
         tool_result_dict = json.loads(tool_args_raw)
         if tool_result_dict.get("exam_date"):
-            tool_result_dict["exam_date"] = _normalize_date_format(
-                tool_result_dict["exam_date"]
-            )
+            tool_result_dict["exam_date"] = _normalize_date_format(tool_result_dict["exam_date"])
         return DocumentClassification(**tool_result_dict)
     except Exception as e:
         logger.error(f"Error during document classification: {e}")
@@ -258,9 +254,7 @@ def transcribe_page(
         return ""
 
     if not completion or not completion.choices or len(completion.choices) == 0:
-        logger.error(
-            f"Invalid completion response for transcription of {image_path.name}"
-        )
+        logger.error(f"Invalid completion response for transcription of {image_path.name}")
         return ""
 
     content = completion.choices[0].message.content
@@ -315,9 +309,7 @@ def transcribe_with_retry(
     Returns:
         Tuple of (transcription_text, prompt_variant_used, attempts_made)
     """
-    for attempt, prompt_variant in enumerate(
-        TRANSCRIPTION_PROMPT_VARIANTS[: max_retries + 1]
-    ):
+    for attempt, prompt_variant in enumerate(TRANSCRIPTION_PROMPT_VARIANTS[: max_retries + 1]):
         try:
             logger.debug(
                 f"Transcription attempt {attempt + 1} using {prompt_variant} for {image_path.name}"
@@ -333,9 +325,7 @@ def transcribe_with_retry(
             )
 
             # Check if transcription is valid (not a refusal)
-            is_valid, reason = validate_transcription(
-                transcription, validation_model_id, client
-            )
+            is_valid, reason = validate_transcription(transcription, validation_model_id, client)
 
             if is_valid:
                 if attempt > 0:
@@ -352,9 +342,7 @@ def transcribe_with_retry(
             )
 
         except Exception as e:
-            logger.warning(
-                f"Transcription failed with {prompt_variant} for {image_path.name}: {e}"
-            )
+            logger.error(f"Transcription failed with {prompt_variant} for {image_path.name}: {e}")
             continue
 
     # All variants exhausted - return the last transcription even if invalid
@@ -365,9 +353,7 @@ def transcribe_with_retry(
     return transcription, TRANSCRIPTION_PROMPT_VARIANTS[0], max_retries + 1
 
 
-def validate_transcription(
-    transcription: str, model_id: str, client: OpenAI
-) -> tuple[bool, str]:
+def validate_transcription(transcription: str, model_id: str, client: OpenAI) -> tuple[bool, str]:
     """Returns (is_valid, reason). Uses LLM to check if transcription is a refusal."""
     # Empty or too short
     if not transcription or len(transcription.strip()) < 20:

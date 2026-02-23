@@ -41,3 +41,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["medical_exams_parser"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
