@@ -11,9 +11,6 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-UNKNOWN_VALUE = "$UNKNOWN$"
-
-
 def _is_running_in_docker() -> bool:
     """Detect if running inside a Docker container."""
     return os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv")
@@ -46,8 +43,6 @@ class ProfileConfig:
     # Demographics (for extraction context)
     full_name: Optional[str] = None
     birth_date: Optional[str] = None  # YYYY-MM-DD
-    gender: Optional[str] = None
-    nationality: Optional[str] = None
     locale: Optional[str] = None  # e.g. "pt-PT"
 
     @classmethod
@@ -84,8 +79,6 @@ class ProfileConfig:
             workers=workers,
             full_name=data.get("full_name"),
             birth_date=data.get("birth_date"),
-            gender=data.get("gender"),
-            nationality=data.get("nationality"),
             locale=data.get("locale"),
         )
 

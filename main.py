@@ -6,7 +6,6 @@ import shutil
 import sys
 import logging
 import tempfile
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -18,8 +17,6 @@ from tqdm import tqdm
 
 from config import ExtractionConfig, ProfileConfig
 from extraction import (
-    extract_exams_from_page_image,
-    extract_with_retry,
     transcribe_with_retry,
     self_consistency,
     classify_document,
@@ -331,24 +328,6 @@ def process_single_pdf(
         return page_count
 
     # NORMAL MODE: Continue with full processing
-    """
-    Process a single PDF file using two-phase approach:
-    1. Classify document (is it a medical exam?)
-    2. If yes, transcribe all pages verbatim
-
-    Args:
-        pdf_path: Path to the PDF file
-        output_path: Base output directory
-        config: Extraction configuration
-        client: OpenAI client instance
-        page_filter: If set, only process this specific page number
-
-    Returns:
-        Number of pages processed if success
-        None if processing failed
-        "skipped" if document is not a medical exam
-    """
-    doc_stem = pdf_path.stem
     logger.info(f"Processing: {pdf_path.name}")
 
     # Check if we can reuse existing images from output directory

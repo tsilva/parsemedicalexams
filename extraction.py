@@ -806,8 +806,6 @@ def _fix_malformed_json_string(text: str) -> str:
     """
     # First, try a regex-based approach to extract and fix the transcription field
     # which is where most issues occur
-    import re
-
     def fix_transcription_value(match):
         """Escape problematic characters in transcription value."""
         content = match.group(1)
