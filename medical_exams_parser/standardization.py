@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from openai import OpenAI
 
-from utils import parse_llm_json_response, load_prompt
+from .utils import parse_llm_json_response, load_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ def load_cache(name: str) -> dict:
     path = CACHE_DIR / f"{name}.json"
     if path.exists():
         try:
-            return json.load(open(path, encoding='utf-8'))
+            return json.load(open(path, encoding="utf-8"))
         except (json.JSONDecodeError, IOError) as e:
             logger.warning(f"Failed to load cache {name}: {e}")
     return {}
@@ -28,14 +28,12 @@ def save_cache(name: str, cache: dict):
     """Save cache to JSON, sorted alphabetically for easy editing."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = CACHE_DIR / f"{name}.json"
-    with open(path, 'w', encoding='utf-8') as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(cache, f, indent=2, ensure_ascii=False, sort_keys=True)
 
 
 def standardize_exam_types(
-    raw_exam_names: list[str],
-    model_id: str,
-    client: OpenAI
+    raw_exam_names: list[str], model_id: str, client: OpenAI
 ) -> dict[str, tuple[str, str]]:
     """
     Map raw exam names to (exam_type, standardized_name) using LLM with cache.
@@ -65,7 +63,9 @@ def standardize_exam_types(
 
     # Call LLM only for uncached names
     if uncached_names:
-        logger.info(f"[exam_type_standardization] {len(uncached_names)} uncached names, calling LLM...")
+        logger.info(
+            f"[exam_type_standardization] {len(uncached_names)} uncached names, calling LLM..."
+        )
 
         system_prompt = load_prompt("standardization_system")
         user_prompt_template = load_prompt("standardization_user")
@@ -78,10 +78,10 @@ def standardize_exam_types(
                 model=model_id,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
+                    {"role": "user", "content": user_prompt},
                 ],
                 temperature=0.1,
-                max_tokens=4000
+                max_tokens=4000,
             )
 
             if not completion or not completion.choices:
@@ -97,24 +97,39 @@ def standardize_exam_types(
                     result = llm_result[raw_name]
                     exam_type = result.get("exam_type", "other")
                     std_name = result.get("standardized_name", raw_name)
-                    cache[cache_key(raw_name)] = {"exam_type": exam_type, "standardized_name": std_name}
+                    cache[cache_key(raw_name)] = {
+                        "exam_type": exam_type,
+                        "standardized_name": std_name,
+                    }
                 else:
-                    logger.warning(f"LLM didn't return mapping for '{raw_name}', using raw name")
-                    cache[cache_key(raw_name)] = {"exam_type": "other", "standardized_name": raw_name}
+                    logger.warning(
+                        f"LLM didn't return mapping for '{raw_name}', using raw name"
+                    )
+                    cache[cache_key(raw_name)] = {
+                        "exam_type": "other",
+                        "standardized_name": raw_name,
+                    }
 
             save_cache("exam_type_standardization", cache)
-            logger.info(f"[exam_type_standardization] Cache updated with {len(uncached_names)} entries")
+            logger.info(
+                f"[exam_type_standardization] Cache updated with {len(uncached_names)} entries"
+            )
 
         except Exception as e:
             logger.error(f"Error during exam standardization: {e}")
             # Fill in defaults for uncached names
             for raw_name in uncached_names:
-                cache[cache_key(raw_name)] = {"exam_type": "other", "standardized_name": raw_name}
+                cache[cache_key(raw_name)] = {
+                    "exam_type": "other",
+                    "standardized_name": raw_name,
+                }
 
     # Return results for all names from cache
     result = {}
     for name in raw_exam_names:
-        cached = cache.get(cache_key(name), {"exam_type": "other", "standardized_name": name})
+        cached = cache.get(
+            cache_key(name), {"exam_type": "other", "standardized_name": name}
+        )
         result[name] = (cached["exam_type"], cached["standardized_name"])
 
     return result

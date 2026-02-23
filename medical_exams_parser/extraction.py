@@ -10,8 +10,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pydantic import BaseModel, Field
 from openai import OpenAI, APIError
 
-from config import resolve_base_url
-from utils import parse_llm_json_response, load_prompt, strip_markdown_fences, extract_dates_from_text
+from .config import resolve_base_url
+from .utils import (
+    parse_llm_json_response,
+    load_prompt,
+    strip_markdown_fences,
+    extract_dates_from_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +196,9 @@ def classify_document(
         tool_args_raw = completion.choices[0].message.tool_calls[0].function.arguments
         tool_result_dict = json.loads(tool_args_raw)
         if tool_result_dict.get("exam_date"):
-            tool_result_dict["exam_date"] = _normalize_date_format(tool_result_dict["exam_date"])
+            tool_result_dict["exam_date"] = _normalize_date_format(
+                tool_result_dict["exam_date"]
+            )
         return DocumentClassification(**tool_result_dict)
     except Exception as e:
         logger.error(f"Error during document classification: {e}")
@@ -461,5 +468,3 @@ def score_transcription_confidence(
     except Exception as e:
         logger.error(f"Error during confidence scoring: {e}")
         return 0.5  # Default to neutral confidence
-
-

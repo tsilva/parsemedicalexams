@@ -3,7 +3,7 @@
 import logging
 from openai import OpenAI
 
-from utils import load_prompt
+from .utils import load_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -17,18 +17,22 @@ def _estimate_tokens(text: str) -> int:
 
 def _build_exam_list(exams: list[dict]) -> str:
     """Build a numbered exam list string for prompt context."""
+
     def row(i, e):
         name = e.get("exam_name_standardized") or e.get("exam_name_raw", "Unknown")
         d = e.get("exam_date", "")
         return f"{i}. {name} [{e.get('exam_type', 'other')}]{f' ({d})' if d else ''}"
+
     return "\n".join(row(i, e) for i, e in enumerate(exams, 1))
 
 
 def _build_transcriptions(exams: list[dict]) -> str:
     """Concatenate exam transcriptions with separators."""
+
     def row(i, e):
         name = e.get("exam_name_standardized") or e.get("exam_name_raw", "Unknown")
         return f"--- EXAM {i}: {name} (Page {e.get('page_number', '?')}) ---\n{e.get('transcription', '').strip()}"
+
     return "\n\n".join(row(i, e) for i, e in enumerate(exams, 1))
 
 
@@ -69,8 +73,12 @@ def summarize_document(
     content_budget = max_input_tokens - fixed_overhead_tokens
 
     return _incremental_summarize(
-        exams_with_content, system_prompt, user_prompt_template,
-        content_budget, model_id, client
+        exams_with_content,
+        system_prompt,
+        user_prompt_template,
+        content_budget,
+        model_id,
+        client,
     )
 
 
@@ -109,7 +117,9 @@ def _incremental_summarize(
                     new_transcriptions=transcriptions,
                 )
 
-            logger.info(f"Summarizing chunk {chunk_idx + 1}/{len(chunks)} ({len(chunk)} exams)")
+            logger.info(
+                f"Summarizing chunk {chunk_idx + 1}/{len(chunks)} ({len(chunk)} exams)"
+            )
             running_summary = _llm_summarize(
                 [
                     {"role": "system", "content": system_prompt},

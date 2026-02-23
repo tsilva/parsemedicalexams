@@ -15,18 +15,22 @@ from pdf2image import convert_from_path
 from openai import OpenAI
 from tqdm import tqdm
 
-from config import ExtractionConfig, ProfileConfig
-from extraction import (
+from medical_exams_parser import (
+    ExtractionConfig,
+    ProfileConfig,
     transcribe_with_retry,
     self_consistency,
     classify_document,
     transcribe_page,
     score_transcription_confidence,
     DocumentClassification,
+    standardize_exam_types,
+    summarize_document,
+    preprocess_page_image,
+    setup_logging,
+    load_dotenv_with_env,
+    extract_dates_from_text,
 )
-from standardization import standardize_exam_types
-from summarization import summarize_document
-from utils import preprocess_page_image, setup_logging, load_dotenv_with_env, extract_dates_from_text
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +49,11 @@ _FRONTMATTER_MAP = {
 
 def _transcription_files(doc_dir: Path, doc_stem: str) -> list[Path]:
     """Return all transcription .md files (excluding .summary.md) in doc_dir."""
-    return [f for f in doc_dir.glob(f"{doc_stem}.*.md") if not f.name.endswith(".summary.md")]
+    return [
+        f
+        for f in doc_dir.glob(f"{doc_stem}.*.md")
+        if not f.name.endswith(".summary.md")
+    ]
 
 
 def is_document_processed(pdf_path: Path, output_path: Path) -> bool:
@@ -59,7 +67,11 @@ def is_document_processed(pdf_path: Path, output_path: Path) -> bool:
 
 def build_exam_frontmatter(exam: dict, extra_fields: dict = None) -> dict:
     """Build YAML frontmatter dict from an exam dict."""
-    fm = {fm_key: exam[exam_key] for exam_key, fm_key in _FRONTMATTER_MAP.items() if exam.get(exam_key)}
+    fm = {
+        fm_key: exam[exam_key]
+        for exam_key, fm_key in _FRONTMATTER_MAP.items()
+        if exam.get(exam_key)
+    }
     if extra_fields:
         fm.update(extra_fields)
     return fm
@@ -96,7 +108,15 @@ def save_transcription_file(
     frontmatter = {}
     if exams:
         exam = exams[0]
-        extra = {k: exam[ek] for k, ek in [("page", "page_number"), ("source", "source_file"), ("prompt_variant", "prompt_variant")] if exam.get(ek)}
+        extra = {
+            k: exam[ek]
+            for k, ek in [
+                ("page", "page_number"),
+                ("source", "source_file"),
+                ("prompt_variant", "prompt_variant"),
+            ]
+            if exam.get(ek)
+        }
         if exam.get("transcription_confidence") is not None:
             extra["confidence"] = exam["transcription_confidence"]
         if (exam.get("retry_attempts") or 0) > 1:
@@ -119,7 +139,9 @@ def save_document_summary(
     if summary:
         summary_path = doc_output_dir / f"{doc_stem}.summary.md"
         frontmatter = build_exam_frontmatter(exams[0]) if exams else {}
-        write_markdown_with_frontmatter(summary_path, frontmatter, summary.strip() + "\n")
+        write_markdown_with_frontmatter(
+            summary_path, frontmatter, summary.strip() + "\n"
+        )
 
 
 def extract_date_from_filename(filename: str) -> str | None:
@@ -643,7 +665,9 @@ def validate_pipeline_outputs(pdf_files: list[Path], output_path: Path) -> list[
         if not jpg_count:
             missing.append(f"Missing page images in: {doc_output_dir}")
         elif jpg_count != md_count:
-            missing.append(f"Page count mismatch: {jpg_count} images, {md_count} transcriptions in {doc_stem}")
+            missing.append(
+                f"Page count mismatch: {jpg_count} images, {md_count} transcriptions in {doc_stem}"
+            )
         summary_path = doc_output_dir / f"{doc_stem}.summary.md"
         if not summary_path.exists():
             missing.append(f"Missing document summary: {summary_path}")
@@ -802,13 +826,17 @@ def run_profile(profile_name: str, args) -> bool:
 
     # Apply profile overrides
     if profile.model:
-        config.extract_model_id = config.self_consistency_model_id = config.summarize_model_id = profile.model
+        config.extract_model_id = config.self_consistency_model_id = (
+            config.summarize_model_id
+        ) = profile.model
     if profile.workers:
         config.max_workers = profile.workers
 
     # Apply CLI overrides (highest priority)
     if args.model:
-        config.extract_model_id = config.self_consistency_model_id = config.summarize_model_id = args.model
+        config.extract_model_id = config.self_consistency_model_id = (
+            config.summarize_model_id
+        ) = args.model
     if args.workers:
         config.max_workers = args.workers
     if args.pattern:
@@ -963,11 +991,17 @@ def run_profile(profile_name: str, args) -> bool:
 
     # Summary
     if config.dry_run:
-        logger.info(f"DRY RUN COMPLETE - Would process: {len(processed_documents)} documents ({total_pages} pages)")
+        logger.info(
+            f"DRY RUN COMPLETE - Would process: {len(processed_documents)} documents ({total_pages} pages)"
+        )
         logger.info(f"Would skip (already processed): {already_processed} documents")
-        logger.info(f"Would generate: {total_pages} .md files, {len(processed_documents)} summaries")
+        logger.info(
+            f"Would generate: {total_pages} .md files, {len(processed_documents)} summaries"
+        )
         if skipped_documents:
-            logger.info(f"Would classify as non-exam: {len(skipped_documents)} documents")
+            logger.info(
+                f"Would classify as non-exam: {len(skipped_documents)} documents"
+            )
         if failed_count > 0:
             logger.warning(f"Would fail: {failed_count} documents")
         return True
@@ -975,7 +1009,9 @@ def run_profile(profile_name: str, args) -> bool:
     logger.info("=" * 60)
     logger.info("Pipeline Complete")
     logger.info("=" * 60)
-    logger.info(f"Processed: {len(processed_documents)} documents ({total_pages} pages)")
+    logger.info(
+        f"Processed: {len(processed_documents)} documents ({total_pages} pages)"
+    )
     logger.info(f"Skipped (not medical exams): {len(skipped_documents)}")
     if failed_count > 0:
         logger.warning(f"Failed: {failed_count}")
