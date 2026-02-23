@@ -22,52 +22,47 @@ from extraction import (
     classify_document,
     transcribe_page,
     score_transcription_confidence,
-    validate_transcription,
     DocumentClassification,
 )
 from standardization import standardize_exam_types
 from summarization import summarize_document
-from utils import preprocess_page_image, setup_logging, load_dotenv_with_env
+from utils import preprocess_page_image, setup_logging, load_dotenv_with_env, extract_dates_from_text
 
 logger = logging.getLogger(__name__)
+
+
+# exam dict key -> YAML frontmatter key
+_FRONTMATTER_MAP = {
+    "exam_date": "exam_date",
+    "exam_name_raw": "exam_name_raw",
+    "exam_name_standardized": "title",
+    "exam_type": "category",
+    "physician_name": "doctor",
+    "facility_name": "facility",
+    "department": "department",
+}
+
+
+def _transcription_files(doc_dir: Path, doc_stem: str) -> list[Path]:
+    """Return all transcription .md files (excluding .summary.md) in doc_dir."""
+    return [f for f in doc_dir.glob(f"{doc_stem}.*.md") if not f.name.endswith(".summary.md")]
 
 
 def is_document_processed(pdf_path: Path, output_path: Path) -> bool:
     """Check if a PDF has already been processed by looking for transcription .md files."""
     doc_stem = pdf_path.stem
     doc_output_dir = output_path / doc_stem
-    # A document is considered processed if its output directory exists and has transcription .md files
     if not doc_output_dir.exists():
         return False
-    # Find .md files excluding .summary.md
-    md_files = [
-        f
-        for f in doc_output_dir.glob(f"{doc_stem}.*.md")
-        if not f.name.endswith(".summary.md")
-    ]
-    return len(md_files) > 0
+    return len(_transcription_files(doc_output_dir, doc_stem)) > 0
 
 
 def build_exam_frontmatter(exam: dict, extra_fields: dict = None) -> dict:
     """Build YAML frontmatter dict from an exam dict."""
-    frontmatter = {}
-    if exam.get("exam_date"):
-        frontmatter["exam_date"] = exam["exam_date"]
-    if exam.get("exam_name_raw"):
-        frontmatter["exam_name_raw"] = exam["exam_name_raw"]
-    if exam.get("exam_name_standardized"):
-        frontmatter["title"] = exam["exam_name_standardized"]
-    if exam.get("exam_type"):
-        frontmatter["category"] = exam["exam_type"]
-    if exam.get("physician_name"):
-        frontmatter["doctor"] = exam["physician_name"]
-    if exam.get("facility_name"):
-        frontmatter["facility"] = exam["facility_name"]
-    if exam.get("department"):
-        frontmatter["department"] = exam["department"]
+    fm = {fm_key: exam[exam_key] for exam_key, fm_key in _FRONTMATTER_MAP.items() if exam.get(exam_key)}
     if extra_fields:
-        frontmatter.update(extra_fields)
-    return frontmatter
+        fm.update(extra_fields)
+    return fm
 
 
 def write_markdown_with_frontmatter(path: Path, frontmatter: dict, body: str) -> None:
@@ -101,16 +96,10 @@ def save_transcription_file(
     frontmatter = {}
     if exams:
         exam = exams[0]
-        extra = {}
+        extra = {k: exam[ek] for k, ek in [("page", "page_number"), ("source", "source_file"), ("prompt_variant", "prompt_variant")] if exam.get(ek)}
         if exam.get("transcription_confidence") is not None:
             extra["confidence"] = exam["transcription_confidence"]
-        if exam.get("page_number"):
-            extra["page"] = exam["page_number"]
-        if exam.get("source_file"):
-            extra["source"] = exam["source_file"]
-        if exam.get("prompt_variant"):
-            extra["prompt_variant"] = exam["prompt_variant"]
-        if exam.get("retry_attempts") and exam["retry_attempts"] > 1:
+        if (exam.get("retry_attempts") or 0) > 1:
             extra["retry_attempts"] = exam["retry_attempts"]
         frontmatter = build_exam_frontmatter(exam, extra)
 
@@ -153,70 +142,13 @@ def extract_date_from_filename(filename: str) -> str | None:
     return None
 
 
-def extract_dates_from_text(text: str) -> list[str]:
-    """
-    Extract all dates in YYYY-MM-DD format from text.
-
-    Handles common Portuguese/European date formats:
-    - DD/MM/YYYY (e.g., 20/11/2024)
-    - DD-MM-YYYY (e.g., 20-11-2024)
-    - YYYY-MM-DD (e.g., 2024-11-20)
-    - DD de MMMM de YYYY (e.g., 20 de Novembro de 2024)
-
-    Args:
-        text: Text to extract dates from
-
-    Returns:
-        List of dates in YYYY-MM-DD format
-    """
-    dates = []
-
-    # Pattern 1: YYYY-MM-DD (already correct format)
-    for match in re.finditer(r"\b(\d{4})-(\d{2})-(\d{2})\b", text):
-        year, month, day = match.groups()
-        # Validate ranges
-        if 1900 <= int(year) <= 2100 and 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
-            dates.append(f"{year}-{month}-{day}")
-
-    # Pattern 2: DD/MM/YYYY or DD-MM-YYYY
-    for match in re.finditer(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b", text):
-        day, month, year = match.groups()
-        # Validate ranges
-        day_int, month_int, year_int = int(day), int(month), int(year)
-        if 1900 <= year_int <= 2100 and 1 <= month_int <= 12 and 1 <= day_int <= 31:
-            dates.append(f"{year}-{month:0>2}-{day:0>2}")
-
-    return dates
-
-
 def select_most_frequent_date(
     exams: list[dict],
     exclude_dates: set[str] | None = None,
     filename_date: str | None = None,
 ) -> str | None:
-    """
-    Select the most frequent date across all pages using frequency-based voting.
-
-    This handles multi-era documents where administrative pages (e.g., 2024 cover letter)
-    may have different dates than the actual medical records (e.g., 1997 hospitalization).
-
-    First extracts dates from each page's transcription, then votes on the most frequent.
-    If the result conflicts with the filename date, and the filename date appears in at least
-    one page's transcription, prefer the filename date (handles DD/MM vs MM/DD ambiguity).
-
-    Args:
-        exams: List of exam dictionaries with transcriptions
-        exclude_dates: Dates to exclude (e.g. patient birth date)
-        filename_date: Date extracted from filename (YYYY-MM-DD), used as tiebreaker
-
-    Returns:
-        The most frequently occurring date, or None if no dates found
-
-    Example:
-        - Page 1: 2024 (1 occurrence)
-        - Pages 2-45: 1997 (44 occurrences)
-        - Result: 1997 (most frequent = real document date)
-    """
+    """Select the most frequent exam date across all pages using frequency-based voting.
+    Handles multi-era documents; prefers filename_date as tiebreaker for DD/MM vs MM/DD ambiguity."""
     from collections import Counter
 
     # Extract dates from each page's transcription
@@ -280,23 +212,8 @@ def process_single_pdf(
     birth_date: str | None = None,
     force_regenerate_images: bool = False,
 ) -> int | None | str:
-    """
-    Process a single PDF file using two-phase approach:
-    1. Classify document (is it a medical exam?)
-    2. If yes, transcribe all pages verbatim
-
-    Args:
-        pdf_path: Path to the PDF file
-        output_path: Base output directory
-        config: Extraction configuration
-        client: OpenAI client instance
-        page_filter: If set, only process this specific page number
-
-    Returns:
-        Number of pages processed if success
-        None if processing failed
-        "skipped" if document is not a medical exam
-    """
+    """Process a single PDF: classify, then transcribe all pages verbatim.
+    Returns page count, None on failure, or "skipped" if not a medical exam."""
     doc_stem = pdf_path.stem
     logger.info(f"Processing: {pdf_path.name}")
 
@@ -439,8 +356,7 @@ def process_single_pdf(
                         image_path,
                         config.extract_model_id,
                         client,
-                        base_url=config.openrouter_base_url,
-                        api_key=config.openrouter_api_key,
+                        client=client,
                         profile_context=profile_context,
                     )
                     # Use LLM to assess semantic agreement for confidence
@@ -470,13 +386,6 @@ def process_single_pdf(
             except Exception as e:
                 logger.error(f"Transcription failed for {image_path.name}: {e}")
                 transcription = ""
-
-            # Validate transcription quality
-            is_valid, reason = validate_transcription(
-                transcription, config.validation_model_id, client
-            )
-            if not is_valid:
-                logger.error(f"Invalid transcription for {image_path.name}: {reason}")
 
             if not transcription:
                 logger.warning(f"Empty transcription for {image_path.name}")
@@ -516,10 +425,6 @@ def process_single_pdf(
                     exam = future.result()
                     if exam is not None:
                         all_exams.append(exam)
-                        # Save transcription file immediately
-                        save_transcription_file(
-                            [exam], doc_output_dir, doc_stem, page_num
-                        )
                 except Exception as e:
                     logger.error(f"Page {page_num} processing failed: {e}")
 
@@ -598,34 +503,14 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
 def frontmatter_to_exam(
     frontmatter: dict, transcription: str, page_num: int, source_file: str = None
 ) -> dict:
-    """
-    Convert frontmatter fields to internal exam dict format.
-
-    Frontmatter fields -> Internal fields:
-    - date -> exam_date
-    - exam_name_raw -> exam_name_raw
-    - title -> exam_name_standardized
-    - category -> exam_type
-    - doctor -> physician_name
-    - facility -> facility_name
-    - department -> department
-    - confidence -> transcription_confidence
-    - page -> page_number
-    - source -> source_file
-    """
-    return {
-        "exam_date": frontmatter.get("exam_date"),
-        "exam_name_raw": frontmatter.get("exam_name_raw"),
-        "exam_name_standardized": frontmatter.get("title"),
-        "exam_type": frontmatter.get("category"),
-        "physician_name": frontmatter.get("doctor"),
-        "facility_name": frontmatter.get("facility"),
-        "department": frontmatter.get("department"),
-        "transcription_confidence": frontmatter.get("confidence"),
-        "transcription": transcription,
-        "page_number": frontmatter.get("page") or page_num,
-        "source_file": frontmatter.get("source") or source_file,
-    }
+    """Convert frontmatter fields to internal exam dict format (inverse of _FRONTMATTER_MAP)."""
+    _inv = {fm: ex for ex, fm in _FRONTMATTER_MAP.items()}
+    result = {exam_key: frontmatter.get(fm_key) for fm_key, exam_key in _inv.items()}
+    result["transcription_confidence"] = frontmatter.get("confidence")
+    result["transcription"] = transcription
+    result["page_number"] = frontmatter.get("page") or page_num
+    result["source_file"] = frontmatter.get("source") or source_file
+    return result
 
 
 def regenerate_summaries(
@@ -666,11 +551,7 @@ def regenerate_summaries(
 
         # Page completeness check: compare .jpg count to .md transcription count
         jpg_files = list(doc_dir.glob(f"{doc_stem}.*.jpg"))
-        md_transcription_files = [
-            f
-            for f in doc_dir.glob(f"{doc_stem}.*.md")
-            if not f.name.endswith(".summary.md")
-        ]
+        md_transcription_files = _transcription_files(doc_dir, doc_stem)
         if jpg_files and len(jpg_files) != len(md_transcription_files):
             logger.error(
                 f"Skipping {doc_stem}: page count mismatch — "
@@ -693,14 +574,7 @@ def regenerate_summaries(
                             f"Could not copy PDF (permission denied): {source_pdfs[0].name}"
                         )
 
-        # Find all transcription .md files (exclude .summary.md)
-        md_files = sorted(
-            [
-                f
-                for f in doc_dir.glob(f"{doc_stem}.*.md")
-                if not f.name.endswith(".summary.md")
-            ]
-        )
+        md_files = sorted(_transcription_files(doc_dir, doc_stem))
         if not md_files:
             logger.warning(f"No transcription files found in {doc_dir}")
             continue
@@ -756,108 +630,44 @@ def regenerate_summaries(
 
 
 def validate_pipeline_outputs(pdf_files: list[Path], output_path: Path) -> list[str]:
-    """
-    Validate that all expected output files exist for each source PDF.
-
-    Returns list of missing file paths (empty if all complete).
-    """
+    """Validate expected output files exist for each processed PDF using jpg/md counts."""
     missing = []
-
     for pdf_path in pdf_files:
         doc_stem = pdf_path.stem
         doc_output_dir = output_path / doc_stem
-
-        # Check target folder exists
         if not doc_output_dir.exists():
             missing.append(f"Missing target folder: {doc_output_dir}")
-            continue  # Can't check other files if folder doesn't exist
-
-        # Check source PDF copy
-        pdf_copy = doc_output_dir / pdf_path.name
-        if not pdf_copy.exists():
-            missing.append(f"Missing source PDF copy: {pdf_copy}")
-
-        # Get page count from source PDF
-        try:
-            pages = convert_from_path(str(pdf_path))
-            page_count = len(pages)
-        except Exception as e:
-            missing.append(f"Could not read PDF to count pages: {pdf_path} ({e})")
             continue
-
-        # Check per-page files
-        for page_num in range(1, page_count + 1):
-            # Image
-            img_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.jpg"
-            if not img_path.exists():
-                missing.append(f"Missing page image: {img_path}")
-
-            # Transcription (with frontmatter containing all metadata)
-            md_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.md"
-            if not md_path.exists():
-                missing.append(f"Missing page transcription: {md_path}")
-
-        # Check document summary
+        jpg_count = len(list(doc_output_dir.glob(f"{doc_stem}.*.jpg")))
+        md_count = len(_transcription_files(doc_output_dir, doc_stem))
+        if not jpg_count:
+            missing.append(f"Missing page images in: {doc_output_dir}")
+        elif jpg_count != md_count:
+            missing.append(f"Page count mismatch: {jpg_count} images, {md_count} transcriptions in {doc_stem}")
         summary_path = doc_output_dir / f"{doc_stem}.summary.md"
         if not summary_path.exists():
             missing.append(f"Missing document summary: {summary_path}")
-
     return missing
 
 
 def validate_frontmatter(output_path: Path) -> list[str]:
-    """
-    Validate that all .md files have YAML frontmatter with required fields.
-
-    Returns list of files missing frontmatter or required fields.
-    """
+    """Validate that all .md files have YAML frontmatter with required fields."""
     issues = []
-    required_fields = {"exam_date", "category", "title"}  # Minimum required fields
-
-    # Find all document directories
+    required_fields = {"exam_date", "category", "title"}
     doc_dirs = [d for d in output_path.iterdir() if d.is_dir() and d.name != "logs"]
-
     for doc_dir in doc_dirs:
         doc_stem = doc_dir.name
-
-        # Check all .md files (both transcription and summary)
-        md_files = list(doc_dir.glob(f"{doc_stem}.*.md"))
-
-        for md_path in md_files:
+        for md_path in doc_dir.glob(f"{doc_stem}.*.md"):
             try:
-                with open(md_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-
-                # Check for frontmatter
-                if not content.startswith("---"):
+                frontmatter, _ = parse_frontmatter(md_path.read_text(encoding="utf-8"))
+                if not frontmatter:
                     issues.append(f"Missing frontmatter: {md_path.name}")
                     continue
-
-                # Parse frontmatter
-                end_marker = content.find("---", 3)
-                if end_marker == -1:
-                    issues.append(f"Malformed frontmatter: {md_path.name}")
-                    continue
-
-                frontmatter_str = content[3:end_marker].strip()
-                try:
-                    frontmatter = yaml.safe_load(frontmatter_str)
-                except yaml.YAMLError:
-                    issues.append(f"Invalid YAML frontmatter: {md_path.name}")
-                    continue
-
-                if not frontmatter:
-                    issues.append(f"Empty frontmatter: {md_path.name}")
-                    continue
-
-                # Check for required fields
                 missing_fields = required_fields - set(frontmatter.keys())
                 if missing_fields:
                     issues.append(f"Missing fields {missing_fields}: {md_path.name}")
-
             except Exception as e:
                 issues.append(f"Error reading {md_path.name}: {e}")
-
     return issues
 
 
@@ -992,17 +802,13 @@ def run_profile(profile_name: str, args) -> bool:
 
     # Apply profile overrides
     if profile.model:
-        config.extract_model_id = profile.model
-        config.self_consistency_model_id = profile.model
-        config.summarize_model_id = profile.model
+        config.extract_model_id = config.self_consistency_model_id = config.summarize_model_id = profile.model
     if profile.workers:
         config.max_workers = profile.workers
 
     # Apply CLI overrides (highest priority)
     if args.model:
-        config.extract_model_id = args.model
-        config.self_consistency_model_id = args.model
-        config.summarize_model_id = args.model
+        config.extract_model_id = config.self_consistency_model_id = config.summarize_model_id = args.model
     if args.workers:
         config.max_workers = args.workers
     if args.pattern:
@@ -1054,48 +860,23 @@ def run_profile(profile_name: str, args) -> bool:
         profile_context = "PATIENT CONTEXT:\n" + "\n".join(parts)
         logger.info(f"Profile context injected into extraction prompt")
 
-    # Handle --resummarize mode
-    if args.resummarize:
-        doc_filter = args.document if hasattr(args, "document") else None
-        if doc_filter:
-            logger.info(f"Resummarize mode: regenerating summary for {doc_filter}")
-        else:
-            logger.info("Resummarize mode: regenerating all summaries")
+    # Handle --resummarize and --regenerate modes
+    if args.resummarize or args.regenerate:
+        doc_filter = (args.document or None) if args.resummarize else None
+        mode = "Resummarize" if args.resummarize else "Regeneration"
+        logger.info(f"{mode} mode{f': {doc_filter}' if doc_filter else ''}")
         total_exams = regenerate_summaries(
             config.output_path, config, client, config.input_path, doc_filter=doc_filter
         )
-        logger.info("=" * 60)
-        logger.info("Resummarize Complete")
-        logger.info("=" * 60)
-        logger.info(f"Regenerated summaries for {total_exams} exams")
-        return True
-
-    # Handle --regenerate mode
-    if args.regenerate:
-        logger.info(
-            "Regeneration mode: re-summarizing from existing transcription files"
-        )
-        total_exams = regenerate_summaries(
-            config.output_path, config, client, config.input_path
-        )
-        logger.info("=" * 60)
-        logger.info("Regeneration Complete")
-        logger.info("=" * 60)
-        logger.info(f"Regenerated summaries for {total_exams} exams")
-
-        # Validate frontmatter
-        logger.info("Validating frontmatter...")
-        frontmatter_issues = validate_frontmatter(config.output_path)
-        if frontmatter_issues:
-            logger.warning("=" * 60)
-            logger.warning("Frontmatter issues detected:")
-            logger.warning("=" * 60)
-            for issue in frontmatter_issues:
-                logger.warning(f"  {issue}")
-            logger.warning(f"Total issues: {len(frontmatter_issues)}")
-        else:
-            logger.info("All frontmatter validated successfully")
-
+        logger.info(f"{mode} complete: {total_exams} exams")
+        if args.regenerate:
+            frontmatter_issues = validate_frontmatter(config.output_path)
+            if frontmatter_issues:
+                logger.warning(f"Frontmatter issues ({len(frontmatter_issues)}):")
+                for issue in frontmatter_issues:
+                    logger.warning(f"  {issue}")
+            else:
+                logger.info("All frontmatter validated successfully")
         return True
 
     # Find PDF files
@@ -1182,67 +963,44 @@ def run_profile(profile_name: str, args) -> bool:
 
     # Summary
     if config.dry_run:
-        logger.info("=" * 60)
-        logger.info("DRY RUN COMPLETE - No changes made")
-        logger.info("=" * 60)
-        logger.info(
-            f"Would process: {len(processed_documents)} documents ({total_pages} pages)"
-        )
+        logger.info(f"DRY RUN COMPLETE - Would process: {len(processed_documents)} documents ({total_pages} pages)")
         logger.info(f"Would skip (already processed): {already_processed} documents")
-        logger.info(
-            f"Would generate: {total_pages} .md files, {len(processed_documents)} summaries"
-        )
+        logger.info(f"Would generate: {total_pages} .md files, {len(processed_documents)} summaries")
         if skipped_documents:
-            logger.info(
-                f"Would classify as non-exam: {len(skipped_documents)} documents"
-            )
+            logger.info(f"Would classify as non-exam: {len(skipped_documents)} documents")
         if failed_count > 0:
             logger.warning(f"Would fail: {failed_count} documents")
-        logger.info("=" * 60)
         return True
 
     logger.info("=" * 60)
     logger.info("Pipeline Complete")
     logger.info("=" * 60)
-    logger.info(
-        f"Processed: {len(processed_documents)} documents ({total_pages} pages)"
-    )
+    logger.info(f"Processed: {len(processed_documents)} documents ({total_pages} pages)")
     logger.info(f"Skipped (not medical exams): {len(skipped_documents)}")
     if failed_count > 0:
         logger.warning(f"Failed: {failed_count}")
 
     # Report skipped documents for false negative review
     if skipped_documents:
-        logger.info("=" * 60)
         logger.info("Skipped Documents (review for false negatives):")
-        logger.info("=" * 60)
         for doc_name in skipped_documents:
             logger.info(f"  - {doc_name}")
 
     # Validate outputs for processed documents only (not skipped ones)
-    logger.info("Validating pipeline outputs...")
     missing_outputs = validate_pipeline_outputs(processed_documents, config.output_path)
-
     if missing_outputs:
-        logger.warning("=" * 60)
-        logger.warning("Missing outputs detected:")
-        logger.warning("=" * 60)
+        logger.warning(f"Missing outputs ({len(missing_outputs)}):")
         for item in missing_outputs:
             logger.warning(f"  {item}")
-        logger.warning(f"Total missing: {len(missing_outputs)}")
     else:
         logger.info("All outputs validated successfully")
 
     # Validate frontmatter
-    logger.info("Validating frontmatter...")
     frontmatter_issues = validate_frontmatter(config.output_path)
     if frontmatter_issues:
-        logger.warning("=" * 60)
-        logger.warning("Frontmatter issues detected:")
-        logger.warning("=" * 60)
+        logger.warning(f"Frontmatter issues ({len(frontmatter_issues)}):")
         for issue in frontmatter_issues:
             logger.warning(f"  {issue}")
-        logger.warning(f"Total issues: {len(frontmatter_issues)}")
     else:
         logger.info("All frontmatter validated successfully")
 

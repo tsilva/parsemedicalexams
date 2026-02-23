@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,21 @@ def parse_llm_json_response(text: str, fallback: Any = None) -> Any:
         return json.loads(text)
     except json.JSONDecodeError:
         return fallback
+
+
+def extract_dates_from_text(text: str) -> list[str]:
+    """Extract all dates in YYYY-MM-DD format from text. Handles DD/MM/YYYY, DD-MM-YYYY, and YYYY-MM-DD."""
+    dates = []
+    for match in re.finditer(r"\b(\d{4})-(\d{2})-(\d{2})\b", text):
+        year, month, day = match.groups()
+        if 1900 <= int(year) <= 2100 and 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
+            dates.append(f"{year}-{month}-{day}")
+    for match in re.finditer(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b", text):
+        day, month, year = match.groups()
+        day_int, month_int, year_int = int(day), int(month), int(year)
+        if 1900 <= year_int <= 2100 and 1 <= month_int <= 12 and 1 <= day_int <= 31:
+            dates.append(f"{year}-{month:0>2}-{day:0>2}")
+    return dates
 
 
 def load_dotenv_with_env() -> str | None:

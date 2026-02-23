@@ -17,25 +17,19 @@ def _estimate_tokens(text: str) -> int:
 
 def _build_exam_list(exams: list[dict]) -> str:
     """Build a numbered exam list string for prompt context."""
-    items = []
-    for i, exam in enumerate(exams, 1):
-        exam_name = exam.get("exam_name_standardized") or exam.get("exam_name_raw", "Unknown")
-        exam_type = exam.get("exam_type", "other")
-        exam_date = exam.get("exam_date", "")
-        date_str = f" ({exam_date})" if exam_date else ""
-        items.append(f"{i}. {exam_name} [{exam_type}]{date_str}")
-    return "\n".join(items)
+    def row(i, e):
+        name = e.get("exam_name_standardized") or e.get("exam_name_raw", "Unknown")
+        d = e.get("exam_date", "")
+        return f"{i}. {name} [{e.get('exam_type', 'other')}]{f' ({d})' if d else ''}"
+    return "\n".join(row(i, e) for i, e in enumerate(exams, 1))
 
 
 def _build_transcriptions(exams: list[dict]) -> str:
     """Concatenate exam transcriptions with separators."""
-    parts = []
-    for i, exam in enumerate(exams, 1):
-        exam_name = exam.get("exam_name_standardized") or exam.get("exam_name_raw", "Unknown")
-        page_num = exam.get("page_number", "?")
-        transcription = exam.get("transcription", "").strip()
-        parts.append(f"--- EXAM {i}: {exam_name} (Page {page_num}) ---\n{transcription}")
-    return "\n\n".join(parts)
+    def row(i, e):
+        name = e.get("exam_name_standardized") or e.get("exam_name_raw", "Unknown")
+        return f"--- EXAM {i}: {name} (Page {e.get('page_number', '?')}) ---\n{e.get('transcription', '').strip()}"
+    return "\n\n".join(row(i, e) for i, e in enumerate(exams, 1))
 
 
 def _llm_summarize(messages: list[dict], model_id: str, client: OpenAI) -> str:
@@ -58,22 +52,8 @@ def summarize_document(
     client: OpenAI,
     max_input_tokens: int = DEFAULT_MAX_INPUT_TOKENS,
 ) -> str:
-    """
-    Generate a comprehensive clinical summary for an entire document.
-
-    Always uses incremental summarization: exams are split into chunks that
-    fit within the token budget and processed sequentially, accumulating a
-    running summary.
-
-    Args:
-        exams: List of exam dictionaries with transcription, exam_type, and exam_name_standardized
-        model_id: Model to use for summarization
-        client: OpenAI client instance
-        max_input_tokens: Maximum estimated tokens for LLM input
-
-    Returns:
-        Comprehensive clinical summary of all exams in the document
-    """
+    """Generate a comprehensive clinical summary for all exams in a document.
+    Uses incremental chunked summarization to fit within token budget."""
     if not exams:
         return ""
 

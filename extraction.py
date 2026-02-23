@@ -1,8 +1,6 @@
 """Medical exam extraction from images using vision models."""
 
 import json
-import os
-import re
 import base64
 import logging
 from pathlib import Path
@@ -13,7 +11,7 @@ from pydantic import BaseModel, Field
 from openai import OpenAI, APIError
 
 from config import resolve_base_url
-from utils import parse_llm_json_response, load_prompt, strip_markdown_fences
+from utils import parse_llm_json_response, load_prompt, strip_markdown_fences, extract_dates_from_text
 
 logger = logging.getLogger(__name__)
 
@@ -67,19 +65,8 @@ CLASSIFICATION_TOOLS = [
 # ========================================
 
 
-def self_consistency(fn, model_id, n, *args, base_url=None, api_key=None, **kwargs):
-    """
-    Run a function multiple times and vote on the best result.
-
-    Args:
-        fn: Function to run
-        model_id: Model to use for voting
-        n: Number of times to run the function
-        *args, **kwargs: Arguments to pass to the function
-
-    Returns:
-        Tuple of (best_result, all_results)
-    """
+def self_consistency(fn, model_id, n, *args, client=None, **kwargs):
+    """Run fn n times and vote on the best result. Returns (best_result, all_results)."""
     if n == 1:
         result = fn(*args, **kwargs)
         return result, [result]
@@ -116,27 +103,11 @@ def self_consistency(fn, model_id, n, *args, base_url=None, api_key=None, **kwar
         return results[0], results
 
     # Vote on best result using LLM
-    return vote_on_best_result(
-        results, model_id, fn.__name__, base_url=base_url, api_key=api_key
-    )
+    return vote_on_best_result(results, model_id, fn.__name__, client=client)
 
 
-def vote_on_best_result(
-    results: list,
-    model_id: str,
-    fn_name: str,
-    base_url: str = None,
-    api_key: str = None,
-):
+def vote_on_best_result(results: list, model_id: str, fn_name: str, client: OpenAI):
     """Use LLM to vote on the most consistent result."""
-    client = OpenAI(
-        base_url=base_url
-        or resolve_base_url(
-            os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-        ),
-        api_key=api_key or os.getenv("OPENROUTER_API_KEY"),
-    )
-
     system_prompt = load_prompt("voting_system")
 
     prompt = "".join(
@@ -211,36 +182,19 @@ def classify_document(
             tools=CLASSIFICATION_TOOLS,
             tool_choice={"type": "function", "function": {"name": "classify_document"}},
         )
-    except APIError as e:
-        logger.error(f"API Error during document classification: {e}")
-        # Default to is_exam=True to avoid missing medical content
-        return DocumentClassification(is_exam=True)
-
-    if not completion or not completion.choices or len(completion.choices) == 0:
-        logger.error("Invalid completion response for classification")
-        return DocumentClassification(is_exam=True)
-
-    if not completion.choices[0].message.tool_calls:
-        logger.warning("No tool call by model for document classification")
-        return DocumentClassification(is_exam=True)
-
-    tool_args_raw = completion.choices[0].message.tool_calls[0].function.arguments
-    try:
+        if not completion or not completion.choices or len(completion.choices) == 0:
+            logger.error("Invalid completion response for classification")
+            return DocumentClassification(is_exam=True)
+        if not completion.choices[0].message.tool_calls:
+            logger.warning("No tool call by model for document classification")
+            return DocumentClassification(is_exam=True)
+        tool_args_raw = completion.choices[0].message.tool_calls[0].function.arguments
         tool_result_dict = json.loads(tool_args_raw)
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error for classification: {e}")
-        return DocumentClassification(is_exam=True)
-
-    # Normalize date format
-    if tool_result_dict.get("exam_date"):
-        tool_result_dict["exam_date"] = _normalize_date_format(
-            tool_result_dict["exam_date"]
-        )
-
-    try:
+        if tool_result_dict.get("exam_date"):
+            tool_result_dict["exam_date"] = _normalize_date_format(tool_result_dict["exam_date"])
         return DocumentClassification(**tool_result_dict)
     except Exception as e:
-        logger.error(f"Validation error for classification: {e}")
+        logger.error(f"Error during document classification: {e}")
         return DocumentClassification(is_exam=True)
 
 
@@ -445,29 +399,11 @@ Is this a refusal to transcribe medical content? Reply with only "yes" or "no"."
 
 
 def _normalize_date_format(date_str: Optional[str]) -> Optional[str]:
-    """
-    Normalize date strings to YYYY-MM-DD format.
-
-    Handles common formats:
-    - DD/MM/YYYY (e.g., 20/11/2024 -> 2024-11-20)
-    - DD-MM-YYYY (e.g., 20-11-2024 -> 2024-11-20)
-    - YYYY-MM-DD (already correct)
-    """
+    """Normalize date string to YYYY-MM-DD format."""
     if not date_str or date_str == "0000-00-00":
         return None
-
-    # Already in correct format
-    if re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
-        return date_str
-
-    # DD/MM/YYYY or DD-MM-YYYY format
-    match = re.match(r"^(\d{2})[/-](\d{2})[/-](\d{4})$", date_str)
-    if match:
-        day, month, year = match.groups()
-        return f"{year}-{month}-{day}"
-
-    logger.warning(f"Unable to normalize date format: {date_str}")
-    return None
+    dates = extract_dates_from_text(date_str)
+    return dates[0] if dates else None
 
 
 def score_transcription_confidence(
