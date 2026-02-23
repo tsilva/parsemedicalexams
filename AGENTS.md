@@ -9,6 +9,9 @@ Medical Exams Parser extracts and summarizes medical exam reports (X-rays, MRIs,
 ## Commands
 
 ```bash
+# Verify all modules import cleanly (no test suite exists — this is the baseline check)
+python -c "from extraction import *; from utils import *; from config import *; from standardization import *; from summarization import *; print('All imports OK')"
+
 # Install dependencies
 pip install -e .
 
@@ -60,6 +63,13 @@ Each page produces one file:
 
 Each document produces one summary file:
 - **`{doc_stem}.summary.md`**: Comprehensive clinical summary of all exams in the document (preserves all findings for medical records)
+
+## Development Notes
+
+- **No test suite** — import verification above is the only automated baseline check
+- **Worktrees**: `.worktrees/` is gitignored and ready to use; no setup needed
+- **Sandbox mode**: `pip install -e .` and `python main.py --list-profiles` fail in sandbox (pdf2image restriction); use the import check instead
+- **Dependencies already installed globally** — no reinstall needed when creating new worktrees
 
 ## Patterns from labs-parser
 

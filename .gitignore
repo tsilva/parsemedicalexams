@@ -46,6 +46,9 @@ logs/
 *.log
 # >>> END MANAGED <<<
 
+# Worktrees
+.worktrees/
+
 # Project-specific rules
 !.env.local.example
 !profiles/_template.json
