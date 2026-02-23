@@ -1,15 +1,11 @@
 """Shared utility functions for the medical exams parser."""
 
 import json
-import unicodedata
-import re
-import shutil
 import logging
 import sys
 from pathlib import Path
 from typing import Any
 from PIL import Image, ImageEnhance
-import pandas as pd
 from dotenv import load_dotenv
 
 # Prompts directory
@@ -37,18 +33,6 @@ def preprocess_page_image(image: Image.Image) -> Image.Image:
     return ImageEnhance.Contrast(gray_image).enhance(2.0)
 
 
-def slugify(value: Any) -> str:
-    """Create a normalized slug for mapping/debugging purposes."""
-    if pd.isna(value):
-        return ""
-    value = str(value).strip().lower().replace('µ', 'micro').replace('μ', 'micro').replace('%', 'percent')
-    value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
-    value = re.sub(r"[^\w\s-]", "", value)
-    value = re.sub(r"[\s_]+", "-", value).strip('-')
-    value = value.replace("-", "")
-    return value
-
-
 def strip_markdown_fences(text: str) -> str:
     """Remove markdown code fences from text."""
     if text.startswith("```"):
@@ -68,24 +52,6 @@ def parse_llm_json_response(text: str, fallback: Any = None) -> Any:
         return json.loads(text)
     except json.JSONDecodeError:
         return fallback
-
-
-def clear_directory(dir_path: Path) -> None:
-    """Remove all contents of a directory without deleting the directory itself."""
-    if dir_path.exists():
-        for item in dir_path.iterdir():
-            if item.is_file() or item.is_symlink():
-                item.unlink()
-            else:
-                shutil.rmtree(item)
-
-
-def ensure_columns(df: pd.DataFrame, columns: list[str], default: Any = None) -> pd.DataFrame:
-    """Ensure DataFrame has specified columns, adding them with default value if missing."""
-    for col in columns:
-        if col not in df.columns:
-            df[col] = default
-    return df
 
 
 def load_dotenv_with_env() -> str | None:

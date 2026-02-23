@@ -23,9 +23,7 @@ classifiers = [
 dependencies = [
     "openai",
     "pillow",
-    "pandas",
     "pdf2image",
-    "xlsxwriter",
     "python-dotenv",
     "pydantic",
     "pyyaml",
