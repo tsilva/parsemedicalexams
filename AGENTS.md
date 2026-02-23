@@ -70,6 +70,14 @@ Each document produces one summary file:
 - **Worktrees**: `.worktrees/` is gitignored and ready to use; no setup needed
 - **Sandbox mode**: `pip install -e .` and `python main.py --list-profiles` fail in sandbox (pdf2image restriction); use the import check instead
 - **Dependencies already installed globally** — no reinstall needed when creating new worktrees
+- **Worktree cleanup order**: `git worktree remove` must run *before* `git branch -d` (git blocks branch deletion while a worktree has it checked out)
+
+## Key Helpers (main.py)
+
+- `_FRONTMATTER_MAP` — canonical dict mapping exam dict keys → YAML frontmatter keys; used by `build_exam_frontmatter()` and `frontmatter_to_exam()`
+- `_transcription_files(doc_dir, doc_stem)` — returns all `.md` files in a doc dir excluding `.summary.md`
+- `extract_dates_from_text(text)` — in `utils.py`; extracts YYYY-MM-DD dates from DD/MM/YYYY, DD-MM-YYYY, and ISO formats
+- `self_consistency(fn, model_id, n, *args, client=None, **kwargs)` — pass the existing `OpenAI` client as `client=`; do not pass `base_url`/`api_key`
 
 ## Patterns from labs-parser
 
