@@ -755,4 +755,4 @@ Before finalizing report, verify:
 
 ## Version History
 
-- **v1.0** (2026-01-21): Initial template based on medical-exams-parser quality report
+- **v1.0** (2026-01-21): Initial template based on parsemedicalexams quality report

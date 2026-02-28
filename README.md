@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="logo.png" alt="medical-exams-parser" width="512"/>
+  <img src="logo.png" alt="parsemedicalexams" width="512"/>
 
-  # medical-exams-parser
+  # parsemedicalexams
 
   [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
   [![Python](https://img.shields.io/badge/Python-3.8+-green.svg)](https://python.org)
@@ -201,7 +201,7 @@ source: exam_2024.pdf
 ## Architecture
 
 ```
-medical-exams-parser/
+parsemedicalexams/
 ├── main.py              # Pipeline orchestration, CLI handling
 ├── extraction.py        # Pydantic models, Vision LLM extraction, voting
 ├── standardization.py   # Exam type classification with JSON cache

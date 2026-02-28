@@ -2,7 +2,7 @@
 
 Version 1.0 - Created 2026-01-21
 
-**Project-level skill** for the medical-exams-parser repository.
+**Project-level skill** for the parsemedicalexams repository.
 
 ## Quick Start
 
@@ -130,7 +130,7 @@ PRIORITY_TAGS = {
 - Result: Grade A (Excellent) - 9.8/10 average quality
 - Time: ~4 hours total for complete investigation
 
-See `QUALITY_INVESTIGATION_REPORT.md` in medical-exams-parser repo for full example.
+See `QUALITY_INVESTIGATION_REPORT.md` in parsemedicalexams repo for full example.
 
 ## Requirements
 
@@ -153,7 +153,7 @@ The skill is successful if:
 For issues or questions:
 - Read `SKILL.md` for detailed instructions
 - Check `references/` for methodology details
-- Review example files in medical-exams-parser repo
+- Review example files in parsemedicalexams repo
 
 ## Version History
 

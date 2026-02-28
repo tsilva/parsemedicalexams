@@ -607,4 +607,4 @@ Use this template for each verified document:
 
 ## Version History
 
-- **v1.0** (2026-01-21): Initial checklist based on medical-exams-parser quality investigation
+- **v1.0** (2026-01-21): Initial checklist based on parsemedicalexams quality investigation

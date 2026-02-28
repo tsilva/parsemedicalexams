@@ -376,4 +376,4 @@ If documents organized in natural clusters (e.g., by patient, case, project):
 
 ## Version History
 
-- **v1.0** (2026-01-21): Initial methodology based on medical-exams-parser quality investigation
+- **v1.0** (2026-01-21): Initial methodology based on parsemedicalexams quality investigation
