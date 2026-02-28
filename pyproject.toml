@@ -30,6 +30,9 @@ dependencies = [
     "tqdm",
 ]
 
+[project.scripts]
+medical-exams-parser = "medical_exams_parser.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/tsilva/medical-exams-parser"
 Repository = "https://github.com/tsilva/medical-exams-parser"
