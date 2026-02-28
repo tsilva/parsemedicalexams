@@ -1,12 +1,12 @@
 [project]
-name = "medical-exams-parser"
-version = "0.1.0"
+name = "parsemedicalexams"
+dynamic = ["version"]
 description = "Extract and summarize medical exam reports (X-rays, MRIs, ultrasounds, etc.) with AI precision"
 readme = "README.md"
 requires-python = ">=3.8"
 license = "MIT"
 authors = [
-    {name = "tsilva"}
+    {name = "Tiago Silva", email = "tiago@tsilva.com"}
 ]
 keywords = ["medical", "exam-parser", "ai", "document-processing", "radiology"]
 classifiers = [
@@ -30,20 +30,28 @@ dependencies = [
     "tqdm",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+]
+
 [project.scripts]
-medical-exams-parser = "medical_exams_parser.cli:main"
+parsemedicalexams = "parsemedicalexams.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/tsilva/medical-exams-parser"
-Repository = "https://github.com/tsilva/medical-exams-parser"
-Issues = "https://github.com/tsilva/medical-exams-parser/issues"
+Homepage = "https://github.com/tsilva/parsemedicalexams"
+Repository = "https://github.com/tsilva/parsemedicalexams"
+Issues = "https://github.com/tsilva/parsemedicalexams/issues"
 
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.setuptools]
-packages = ["medical_exams_parser"]
+[tool.hatch.version]
+path = "parsemedicalexams/__init__.py"
 
 [tool.ruff]
 line-length = 100

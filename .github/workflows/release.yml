@@ -1,0 +1,29 @@
+name: Release to PyPI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "parsemedicalexams/__init__.py"
+
+jobs:
+  test:
+    uses: tsilva/.github/.github/workflows/test.yml@main
+
+  pii-scan:
+    uses: tsilva/.github/.github/workflows/pii-scan.yml@main
+
+  publish:
+    needs: [test, pii-scan]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1

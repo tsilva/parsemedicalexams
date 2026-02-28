@@ -1,5 +1,7 @@
 """Medical exams parser package."""
 
+__version__ = "0.1.0"
+
 from .config import ExtractionConfig, ProfileConfig
 from .extraction import (
     transcribe_with_retry,
@@ -19,6 +21,7 @@ from .utils import (
 )
 
 __all__ = [
+    "__version__",
     "ExtractionConfig",
     "ProfileConfig",
     "transcribe_with_retry",

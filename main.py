@@ -1,5 +1,5 @@
 """Backward-compatibility shim."""
-from medical_exams_parser.cli import main
+from parsemedicalexams.cli import main
 
 if __name__ == "__main__":
     main()
