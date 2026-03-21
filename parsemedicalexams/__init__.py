@@ -1,6 +1,6 @@
 """Medical exams parser package."""
 
-__version__ = "0.1.3"
+__version__ = "0.2.0"
 
 from .config import ExtractionConfig, ProfileConfig
 from .extraction import (
@@ -16,7 +16,6 @@ from .summarization import summarize_document
 from .utils import (
     preprocess_page_image,
     setup_logging,
-    load_dotenv_with_env,
     extract_dates_from_text,
 )
 
@@ -34,6 +33,5 @@ __all__ = [
     "summarize_document",
     "preprocess_page_image",
     "setup_logging",
-    "load_dotenv_with_env",
     "extract_dates_from_text",
 ]

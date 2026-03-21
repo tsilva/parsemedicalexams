@@ -10,28 +10,28 @@ Medical Exams Parser extracts and summarizes medical exam reports (X-rays, MRIs,
 
 ```bash
 # Verify all modules import cleanly (no test suite exists — this is the baseline check)
-python -c "from extraction import *; from utils import *; from config import *; from standardization import *; from summarization import *; print('All imports OK')"
+python3 -c "from parsemedicalexams import *; print('All imports OK')"
 
-# Install dependencies
-pip install -e .
+# Install as an editable CLI tool
+uv tool install . --editable
 
-# Run the pipeline (uses .env configuration)
-python main.py
+# Run the pipeline
+medicalexamsparser --profile tiago
 
 # Run with a specific profile
-python main.py --profile tiago
+medicalexamsparser --profile tiago
 
 # List available profiles
-python main.py --list-profiles
+medicalexamsparser --list-profiles
 
 # Regenerate .md files from existing JSON extraction data
-python main.py --profile tiago --regenerate
+medicalexamsparser --profile tiago --regenerate
 
 # Reprocess a specific document (by filename or stem)
-python main.py -p tiago -d exam_2024.pdf
+medicalexamsparser -p tiago -d exam_2024.pdf
 
 # Reprocess a specific page within a document
-python main.py -p tiago -d exam_2024.pdf --page 2
+medicalexamsparser -p tiago -d exam_2024.pdf --page 2
 ```
 
 ## Architecture
@@ -46,15 +46,14 @@ python main.py -p tiago -d exam_2024.pdf --page 2
 ### Key Modules
 - **main.py**: Pipeline orchestration, PDF processing loop, CLI argument handling
 - **extraction.py**: Pydantic models (`MedicalExam`, `MedicalExamReport`), Vision LLM extraction with function calling, self-consistency voting
-- **standardization.py**: Exam type classification using LLM with persistent JSON cache in `config/cache/`
+- **standardization.py**: Exam type classification using LLM with persistent JSON cache in `~/.config/medicalexamsparser/cache/`
 - **summarization.py**: Document-level clinical summarization using LLM (preserves all clinical details for medical records)
-- **config.py**: `ExtractionConfig` (from .env) and `ProfileConfig` (from profiles/*.json)
+- **config.py**: `ExtractionConfig` + `ProfileConfig` loaded from `~/.config/medicalexamsparser/`
 - **utils.py**: Image preprocessing, logging setup, JSON parsing utilities
 
 ### Configuration
-- `.env`: API keys, model IDs, default input/output paths
-- `profiles/*.json`: User-specific path overrides (inherit from .env with `inherit_from_env: true`)
-- `config/cache/*.json`: LLM response caches (user-editable for overrides)
+- `~/.config/medicalexamsparser/*.yaml|json`: User-specific self-contained profiles
+- `~/.config/medicalexamsparser/cache/*.json`: LLM response caches (user-editable for overrides)
 - `prompts/*.md`: All LLM prompts externalized as markdown files
 
 ### Output Format
@@ -68,7 +67,7 @@ Each document produces one summary file:
 
 - **No test suite** — import verification above is the only automated baseline check
 - **Worktrees**: `.worktrees/` is gitignored and ready to use; no setup needed
-- **Sandbox mode**: `pip install -e .` and `python main.py --list-profiles` fail in sandbox (pdf2image restriction); use the import check instead
+- **Sandbox mode**: `uv tool install . --editable` and `medicalexamsparser --list-profiles` may fail in sandboxed environments; use the import check instead
 - **Dependencies already installed globally** — no reinstall needed when creating new worktrees
 - **Worktree cleanup order**: `git worktree remove` must run *before* `git branch -d` (git blocks branch deletion while a worktree has it checked out)
 

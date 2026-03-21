@@ -11,7 +11,6 @@ from pathlib import Path
 
 import yaml
 
-from pdf2image import convert_from_path
 from openai import OpenAI
 from tqdm import tqdm
 
@@ -28,9 +27,9 @@ from . import (
     summarize_document,
     preprocess_page_image,
     setup_logging,
-    load_dotenv_with_env,
     extract_dates_from_text,
 )
+from .config import ensure_config_dir
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +235,8 @@ def process_single_pdf(
 ) -> int | None | str:
     """Process a single PDF: classify, then transcribe all pages verbatim.
     Returns page count, None on failure, or "skipped" if not a medical exam."""
+    from pdf2image import convert_from_path
+
     doc_stem = pdf_path.stem
     logger.info(f"Processing: {pdf_path.name}")
 
@@ -702,15 +703,15 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  parsemedicalexams --profile tsilva              # Process all new PDFs
-  parsemedicalexams --list-profiles               # List available profiles
-  parsemedicalexams -p tsilva --regenerate        # Regenerate summaries only
-  parsemedicalexams -p tsilva --resummarize       # Resummarize all documents
-  parsemedicalexams -p tsilva --resummarize -d exam.pdf  # Resummarize one document
-  parsemedicalexams -p tsilva --reprocess-all     # Force reprocess all documents
-  parsemedicalexams -p tsilva -d exam.pdf         # Reprocess specific document
-  parsemedicalexams -p tsilva -d exam.pdf --page 2  # Reprocess specific page
-  parsemedicalexams -p tsilva --dry-run           # Preview what would be processed
+  medicalexamsparser --profile tsilva              # Process all new PDFs
+  medicalexamsparser --list-profiles               # List available profiles
+  medicalexamsparser -p tsilva --regenerate        # Regenerate summaries only
+  medicalexamsparser -p tsilva --resummarize       # Resummarize all documents
+  medicalexamsparser -p tsilva --resummarize -d exam.pdf  # Resummarize one document
+  medicalexamsparser -p tsilva --reprocess-all     # Force reprocess all documents
+  medicalexamsparser -p tsilva -d exam.pdf         # Reprocess specific document
+  medicalexamsparser -p tsilva -d exam.pdf --page 2  # Reprocess specific page
+  medicalexamsparser -p tsilva --dry-run           # Preview what would be processed
         """,
     )
     parser.add_argument(
@@ -722,7 +723,7 @@ Examples:
     parser.add_argument(
         "--regenerate",
         action="store_true",
-        help="Regenerate summaries from existing transcription files",
+        help="Regenerate summaries from existing transcription markdown files",
     )
     parser.add_argument(
         "--resummarize",
@@ -749,21 +750,16 @@ Examples:
         "--model",
         "-m",
         type=str,
-        help="Model ID for extraction (overrides profile/env)",
+        help="Model ID for extraction (overrides the profile)",
     )
     parser.add_argument(
         "--workers",
         "-w",
         type=int,
-        help="Number of parallel workers (overrides profile/env)",
+        help="Number of parallel workers (overrides the profile)",
     )
     parser.add_argument(
         "--pattern", type=str, help="Regex pattern for input files (overrides profile)"
-    )
-    parser.add_argument(
-        "--env",
-        type=str,
-        help="Environment name to load (loads .env.{name} instead of .env)",
     )
     parser.add_argument(
         "--dry-run",
@@ -784,53 +780,26 @@ def run_profile(profile_name: str, args) -> bool:
     Returns:
         True if successful, False otherwise
     """
-    # Load profile
-    profile_path = None
-    for ext in (".yaml", ".yml", ".json"):
-        p = Path(f"profiles/{profile_name}{ext}")
-        if p.exists():
-            profile_path = p
-            break
-
+    profile_path = ProfileConfig.find_profile(profile_name)
     if not profile_path:
-        print(f"Error: Profile '{profile_name}' not found")
+        print(
+            f"Error: Profile '{profile_name}' not found in {ProfileConfig.config_dir()}"
+        )
         return False
 
     profile = ProfileConfig.from_file(profile_path)
 
-    # Validate profile has required paths
-    if not profile.input_path:
-        print(f"Error: Profile '{profile_name}' has no input_path defined.")
-        return False
-    if not profile.output_path:
-        print(f"Error: Profile '{profile_name}' has no output_path defined.")
+    try:
+        config = ExtractionConfig.from_profile(profile)
+    except ValueError as exc:
+        print(f"Error: {exc}")
         return False
 
-    # Validate input path exists
-    if not profile.input_path.exists():
-        print(f"Error: Input path does not exist: {profile.input_path}")
+    if not config.input_path.exists():
+        print(f"Error: Input path does not exist: {config.input_path}")
         return False
 
-    # Ensure output directory exists
-    profile.output_path.mkdir(parents=True, exist_ok=True)
-
-    # Load base config from environment (API keys and model settings)
-    config = ExtractionConfig.from_env()
-
-    # Apply profile paths to config
-    config.input_path = profile.input_path
-    config.output_path = profile.output_path
-    config.input_file_regex = (
-        profile.input_file_regex or config.input_file_regex or ".*\\.pdf"
-    )
-
-    # Apply profile overrides
-    if profile.model:
-        config.extract_model_id = config.self_consistency_model_id = (
-            config.summarize_model_id
-        ) = profile.model
-    if profile.workers:
-        config.max_workers = profile.workers
+    config.output_path.mkdir(parents=True, exist_ok=True)
 
     # Apply CLI overrides (highest priority)
     if args.model:
@@ -858,6 +827,7 @@ def run_profile(profile_name: str, args) -> bool:
         logger.info("Medical Exams Parser - Starting Pipeline")
         logger.info("=" * 60)
     logger.info(f"Profile: {profile.name}")
+    logger.info(f"Profile file: {profile.source_path}")
     logger.info(f"Input path: {config.input_path}")
     logger.info(f"Output path: {config.output_path}")
     logger.info(f"Extract model: {config.extract_model_id}")
@@ -1045,21 +1015,17 @@ def run_profile(profile_name: str, args) -> bool:
 
 def main():
     """Main pipeline entry point."""
-    env_name = load_dotenv_with_env()
     args = parse_args()
+    config_dir = ensure_config_dir()
 
-    if env_name:
-        print(f"Using environment: {env_name} (.env.{env_name})")
-
-    # Handle --list-profiles
     if args.list_profiles:
         profiles = ProfileConfig.list_profiles()
         if profiles:
-            print("Available profiles:")
+            print(f"Available profiles in {config_dir}:")
             for p in profiles:
                 print(f"  - {p}")
         else:
-            print("No profiles found in profiles/ directory")
+            print(f"No profiles found in {config_dir}")
         return
 
     # --page requires --document
@@ -1074,8 +1040,10 @@ def main():
         # No profile specified - run all profiles
         profiles_to_run = ProfileConfig.list_profiles()
         if not profiles_to_run:
-            print("No profiles found in profiles/ directory")
-            print("Use --list-profiles to see available profiles or create a profile.")
+            print(f"No profiles found in {config_dir}")
+            print(
+                "Create a YAML or JSON profile there, then rerun or use --list-profiles."
+            )
             sys.exit(1)
         print(
             f"Running all {len(profiles_to_run)} profiles: {', '.join(profiles_to_run)}"

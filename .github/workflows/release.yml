@@ -1,29 +1,43 @@
-name: Release to PyPI
-
+name: Release
 on:
   push:
     branches: [main]
-    paths:
-      - "parsemedicalexams/__init__.py"
-
+    paths: [parsemedicalexams/__init__.py]
+concurrency:
+  group: release
+  cancel-in-progress: false
 jobs:
   test:
     uses: tsilva/.github/.github/workflows/test.yml@main
 
-  pii-scan:
-    uses: tsilva/.github/.github/workflows/pii-scan.yml@main
-
   publish:
-    needs: [test, pii-scan]
+    needs: [test]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: pypi
     permissions:
+      contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - run: pip install build
-      - run: python -m build
-      - uses: pypa/gh-action-pypi-publish@release/v1
+          fetch-depth: 0
+      - name: Check version
+        id: check-version
+        uses: tsilva/.github/.github/actions/check-version@main
+      - name: Setup uv
+        if: steps.check-version.outputs.tag_exists == 'false'
+        uses: astral-sh/setup-uv@v4
+        with:
+          cache: true
+      - name: Build package
+        if: steps.check-version.outputs.tag_exists == 'false'
+        run: uv build
+      - name: Create GitHub release
+        if: steps.check-version.outputs.tag_exists == 'false'
+        run: gh release create "${{ steps.check-version.outputs.tag }}" --title "${{ steps.check-version.outputs.tag }}" --generate-notes dist/*
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish to PyPI
+        if: steps.check-version.outputs.tag_exists == 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1

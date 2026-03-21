@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="logo.png" alt="parsemedicalexams" width="512"/>
+  <img src="https://raw.githubusercontent.com/tsilva/parsemedicalexams/main/logo.png" alt="parsemedicalexams" width="512"/>
 
   # parsemedicalexams
 
@@ -16,6 +16,8 @@
 
 ## Features
 
+[![CI](https://github.com/tsilva/parsemedicalexams/actions/workflows/release.yml/badge.svg)](https://github.com/tsilva/parsemedicalexams/actions/workflows/release.yml)
+
 - **Vision-powered extraction** — Uses Vision LLMs to read X-rays, MRIs, ultrasounds, endoscopies, and more directly from PDF scans
 - **Self-consistency voting** — Runs multiple extractions and votes on the best result for maximum reliability
 - **Intelligent classification** — Automatically categorizes exams (imaging, ultrasound, endoscopy, other) and standardizes naming
@@ -29,7 +31,7 @@
 ### 1. Install
 
 ```bash
-pip install -e .
+uv tool install . --editable
 ```
 
 > **Requires [Poppler](https://poppler.freedesktop.org/)** for PDF processing:
@@ -39,21 +41,25 @@ pip install -e .
 ### 2. Configure
 
 ```bash
-cp .env.example .env
+mkdir -p ~/.config/medicalexamsparser
+cp profiles/template.yaml.example ~/.config/medicalexamsparser/tsilva.yaml
 ```
 
-Edit `.env` with your settings:
+Edit `~/.config/medicalexamsparser/tsilva.yaml` with your settings:
 
-```bash
-OPENROUTER_API_KEY=your_api_key_here
-INPUT_PATH=/path/to/your/exam/pdfs
-OUTPUT_PATH=/path/to/output
+```yaml
+name: tsilva
+openrouter_api_key: your_api_key_here
+input_path: /path/to/your/exam/pdfs
+output_path: /path/to/output
+model: google/gemini-2.5-flash
+workers: 4
 ```
 
 ### 3. Run
 
 ```bash
-python main.py
+medicalexamsparser --profile tsilva
 ```
 
 ## How It Works
@@ -75,44 +81,38 @@ python main.py
 
 ## Configuration
 
-### Environment Variables
+### Profiles
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OPENROUTER_API_KEY` | Your OpenRouter API key ([get one here](https://openrouter.ai)) | *required* |
-| `INPUT_PATH` | Directory containing exam PDFs | *required* |
-| `OUTPUT_PATH` | Where to write output files | *required* |
-| `EXTRACT_MODEL_ID` | Vision model for extraction | `google/gemini-2.5-flash` |
-| `SUMMARIZE_MODEL_ID` | Model for summarization | `google/gemini-2.5-flash` |
-| `SELF_CONSISTENCY_MODEL_ID` | Model for voting | `google/gemini-2.5-flash` |
-| `N_EXTRACTIONS` | Number of extraction runs for voting | `3` |
-| `MAX_WORKERS` | Parallel workers for PDF processing | `1` |
-| `INPUT_FILE_REGEX` | Regex pattern for input files | `.*\.pdf` |
-
-### Using Profiles
-
-Profiles let you save different input/output configurations for different use cases:
+All runtime configuration now lives in profile files stored in `~/.config/medicalexamsparser/`.
 
 ```bash
 # Create a profile from template
-cp profiles/_template.yaml profiles/myprofile.yaml
+mkdir -p ~/.config/medicalexamsparser
+cp profiles/template.yaml.example ~/.config/medicalexamsparser/myprofile.yaml
 
 # Run with profile
-python main.py --profile myprofile
+medicalexamsparser --profile myprofile
 
 # List available profiles
-python main.py --list-profiles
+medicalexamsparser --list-profiles
 ```
 
-Profile files (YAML or JSON) support path overrides and model configuration:
+Profiles can be YAML or JSON. A flat YAML profile looks like this:
 
 ```yaml
 name: myprofile
+openrouter_api_key: your_api_key_here
 input_path: /path/to/input
 output_path: /path/to/output
 input_file_regex: ".*\\.pdf"
-model: google/gemini-2.5-flash  # Optional override
-workers: 1                       # Optional override
+model: google/gemini-2.5-flash
+workers: 4
+n_extractions: 3
+validation_model_id: anthropic/claude-haiku-4.5
+summarize_max_input_tokens: 100000
+full_name: "Patient Name"
+birth_date: "1980-01-31"
+locale: "pt-PT"
 ```
 
 ### CLI Options
@@ -133,19 +133,19 @@ workers: 1                       # Optional override
 
 ```bash
 # Process all new PDFs
-python main.py --profile tsilva
+medicalexamsparser --profile tsilva
 
 # Regenerate summaries from existing transcription files
-python main.py --profile tsilva --regenerate
+medicalexamsparser --profile tsilva --regenerate
 
 # Force reprocess all documents
-python main.py --profile tsilva --reprocess-all
+medicalexamsparser --profile tsilva --reprocess-all
 
 # Reprocess a specific document
-python main.py -p tsilva -d exam_2024.pdf
+medicalexamsparser -p tsilva -d exam_2024.pdf
 
 # Reprocess a specific page within a document
-python main.py -p tsilva -d exam_2024.pdf --page 2
+medicalexamsparser -p tsilva -d exam_2024.pdf --page 2
 ```
 
 ## Output Format
@@ -206,20 +206,19 @@ parsemedicalexams/
 ├── extraction.py        # Pydantic models, Vision LLM extraction, voting
 ├── standardization.py   # Exam type classification with JSON cache
 ├── summarization.py     # Document-level clinical summarization
-├── config.py            # ExtractionConfig (.env) + ProfileConfig (profiles/)
+├── config.py            # ExtractionConfig/ProfileConfig (global profile config)
 ├── utils.py             # Image preprocessing, logging, JSON utilities
 ├── prompts/             # Externalized LLM prompts as markdown
-├── profiles/            # User-specific path configurations
-└── config/cache/        # Persistent LLM response caches (user-editable)
+└── profiles/            # Example profile template
 ```
 
 ### Key Design Patterns
 
 - **Two-phase processing**: Classify document first, then transcribe all pages
 - **Two-column naming**: `*_raw` (exact from document) + `*_standardized` (LLM-mapped)
-- **Persistent caching**: LLM standardization results cached in `config/cache/*.json`
+- **Persistent caching**: LLM standardization results cached in `~/.config/medicalexamsparser/cache/*.json`
 - **Editable caches**: Manually override cached values to fix misclassifications
-- **Profile inheritance**: Profiles can inherit from `.env` with overrides
+- **Self-contained profiles**: Each profile carries API, model, path, and patient context configuration
 - **Frequency-based date voting**: Handles multi-era documents (e.g., 2024 cover letter + 1997 records)
 
 ## Requirements

@@ -24,7 +24,6 @@ dependencies = [
     "openai",
     "pillow",
     "pdf2image",
-    "python-dotenv",
     "pydantic",
     "pyyaml",
     "tqdm",
@@ -39,6 +38,7 @@ dev = [
 ]
 
 [project.scripts]
+medicalexamsparser = "parsemedicalexams.cli:main"
 parsemedicalexams = "parsemedicalexams.cli:main"
 
 [project.urls]

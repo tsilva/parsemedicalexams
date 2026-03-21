@@ -2,15 +2,15 @@
 
 import json
 import logging
-from pathlib import Path
 from openai import OpenAI
 
+from .config import get_cache_dir
 from .utils import parse_llm_json_response, load_prompt
 
 logger = logging.getLogger(__name__)
 
 # Cache directory for LLM standardization results (user-editable JSON files)
-CACHE_DIR = Path("config/cache")
+CACHE_DIR = get_cache_dir()
 
 
 def load_cache(name: str) -> dict:

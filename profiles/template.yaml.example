@@ -1,9 +1,11 @@
-# Profile Template - Copy this file and rename to {your_name}.yaml
-full_name: "Your Full Name"
-birth_date: "YYYY-MM-DD"
-gender: "your gender"
-nationality: "your nationality"
-locale: "your locale"
+# Profile Template
+# Copy to ~/.config/medicalexamsparser/{your_name}.yaml
+
+name: "your_name"
+
+# Required: OpenRouter access
+openrouter_api_key: "your_openrouter_api_key"
+# openrouter_base_url: "https://openrouter.ai/api/v1"
 
 # Required: Paths to input/output directories
 input_path: "/path/to/your/exam/pdfs"
@@ -12,6 +14,19 @@ output_path: "/path/to/your/output"
 # Optional: Filter which PDFs to process (default: .*\.pdf)
 input_file_regex: ".*\\.pdf"
 
-# Optional overrides:
-# model: "google/gemini-2.5-flash"  # Extraction model
-# workers: 4                         # Parallel workers
+# Optional model config:
+# model: "google/gemini-2.5-flash"  # Sets extract/summarize/self-consistency together
+# extract_model_id: "google/gemini-2.5-flash"
+# summarize_model_id: "google/gemini-2.5-flash"
+# self_consistency_model_id: "google/gemini-2.5-flash"
+# validation_model_id: "anthropic/claude-haiku-4.5"
+
+# Optional runtime config:
+# n_extractions: 3
+# workers: 4
+# summarize_max_input_tokens: 100000
+
+# Optional patient context
+full_name: "Your Full Name"
+birth_date: "YYYY-MM-DD"
+locale: "pt-PT"

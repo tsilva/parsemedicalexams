@@ -3,11 +3,9 @@
 import json
 import logging
 import re
-import sys
 from pathlib import Path
 from typing import Any
 from PIL import Image, ImageEnhance
-from dotenv import load_dotenv
 
 # Prompts directory
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
@@ -68,46 +66,6 @@ def extract_dates_from_text(text: str) -> list[str]:
         if 1900 <= year_int <= 2100 and 1 <= month_int <= 12 and 1 <= day_int <= 31:
             dates.append(f"{year}-{month:0>2}-{day:0>2}")
     return dates
-
-
-def load_dotenv_with_env() -> str | None:
-    """
-    Load environment variables with optional --env overlay.
-
-    Parses --env flag from sys.argv before full argument parsing,
-    loads base .env first, then overlays .env.{name} if specified.
-
-    Returns:
-        The env name if --env was specified, None otherwise.
-    """
-    # Parse --env flag early (before argparse)
-    env_name = None
-    for i, arg in enumerate(sys.argv):
-        if arg == "--env" and i + 1 < len(sys.argv):
-            env_name = sys.argv[i + 1]
-            break
-        elif arg.startswith("--env="):
-            env_name = arg.split("=", 1)[1]
-            break
-
-    # Load environment file (standalone behavior)
-    if env_name:
-        # Only load .env.{name} when specified
-        env_path = Path(f".env.{env_name}")
-        if env_path.exists():
-            load_dotenv(env_path)
-        else:
-            print(f"Warning: Environment file not found: {env_path}")
-    else:
-        # Load base .env when no env specified
-        load_dotenv()
-
-    # Always overlay .env.local if it exists (local overrides, standard convention)
-    local_env_path = Path(".env.local")
-    if local_env_path.exists():
-        load_dotenv(local_env_path, override=True)
-
-    return env_name
 
 
 def setup_logging(log_dir: Path, clear_logs: bool = False) -> logging.Logger:
