@@ -29,7 +29,7 @@ from . import (
     setup_logging,
     extract_dates_from_text,
 )
-from .config import ensure_config_dir
+from .config import LEGACY_CONFIG_DIR, ensure_config_dir, migrate_profiles
 
 logger = logging.getLogger(__name__)
 
@@ -1017,6 +1017,10 @@ def main():
     """Main pipeline entry point."""
     args = parse_args()
     config_dir = ensure_config_dir()
+    moved_profiles = migrate_profiles(LEGACY_CONFIG_DIR)
+
+    if moved_profiles:
+        print(f"Moved {len(moved_profiles)} profile file(s) into {config_dir}")
 
     if args.list_profiles:
         profiles = ProfileConfig.list_profiles()

@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -11,8 +12,9 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-APP_NAME = "medicalexamsparser"
+APP_NAME = "parsemedicalexams"
 DEFAULT_CONFIG_DIR = Path.home() / ".config" / APP_NAME
+LEGACY_CONFIG_DIR = Path.home() / ".config" / "medicalexamsparser"
 PROFILE_EXTENSIONS = (".yaml", ".yml", ".json")
 DEFAULT_MODEL_ID = "google/gemini-2.5-flash"
 DEFAULT_VALIDATION_MODEL_ID = "anthropic/claude-haiku-4.5"
@@ -51,6 +53,33 @@ def ensure_config_dir() -> Path:
     config_dir = get_config_dir()
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir
+
+
+def migrate_profiles(*source_dirs: Path) -> list[Path]:
+    """Move profile and example files into the global config directory."""
+    config_dir = ensure_config_dir()
+    moved_files: list[Path] = []
+    candidate_extensions = PROFILE_EXTENSIONS + (".example",)
+
+    for source_dir in source_dirs:
+        if not source_dir.exists() or source_dir.resolve() == config_dir.resolve():
+            continue
+
+        for source_path in sorted(source_dir.iterdir()):
+            if not source_path.is_file():
+                continue
+
+            if not any(source_path.name.endswith(ext) for ext in candidate_extensions):
+                continue
+
+            target_path = config_dir / source_path.name
+            if target_path.exists():
+                continue
+
+            shutil.move(str(source_path), str(target_path))
+            moved_files.append(target_path)
+
+    return moved_files
 
 
 def _load_profile_data(profile_path: Path) -> dict[str, Any]:

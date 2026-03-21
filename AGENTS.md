@@ -46,14 +46,14 @@ medicalexamsparser -p tiago -d exam_2024.pdf --page 2
 ### Key Modules
 - **main.py**: Pipeline orchestration, PDF processing loop, CLI argument handling
 - **extraction.py**: Pydantic models (`MedicalExam`, `MedicalExamReport`), Vision LLM extraction with function calling, self-consistency voting
-- **standardization.py**: Exam type classification using LLM with persistent JSON cache in `~/.config/medicalexamsparser/cache/`
+- **standardization.py**: Exam type classification using LLM with persistent JSON cache in `~/.config/parsemedicalexams/cache/`
 - **summarization.py**: Document-level clinical summarization using LLM (preserves all clinical details for medical records)
-- **config.py**: `ExtractionConfig` + `ProfileConfig` loaded from `~/.config/medicalexamsparser/`
+- **config.py**: `ExtractionConfig` + `ProfileConfig` loaded from `~/.config/parsemedicalexams/`
 - **utils.py**: Image preprocessing, logging setup, JSON parsing utilities
 
 ### Configuration
-- `~/.config/medicalexamsparser/*.yaml|json`: User-specific self-contained profiles
-- `~/.config/medicalexamsparser/cache/*.json`: LLM response caches (user-editable for overrides)
+- `~/.config/parsemedicalexams/*.yaml|json`: User-specific self-contained profiles
+- `~/.config/parsemedicalexams/cache/*.json`: LLM response caches (user-editable for overrides)
 - `prompts/*.md`: All LLM prompts externalized as markdown files
 
 ### Output Format

@@ -1,5 +1,5 @@
 # Profile Template
-# Copy to ~/.config/medicalexamsparser/{your_name}.yaml
+# Copy to ~/.config/parsemedicalexams/{your_name}.yaml
 
 name: "your_name"
 

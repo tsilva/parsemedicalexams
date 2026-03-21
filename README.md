@@ -41,11 +41,11 @@ uv tool install . --editable
 ### 2. Configure
 
 ```bash
-mkdir -p ~/.config/medicalexamsparser
-cp profiles/template.yaml.example ~/.config/medicalexamsparser/tsilva.yaml
+mkdir -p ~/.config/parsemedicalexams
+cp profiles/template.yaml.example ~/.config/parsemedicalexams/tsilva.yaml
 ```
 
-Edit `~/.config/medicalexamsparser/tsilva.yaml` with your settings:
+Edit `~/.config/parsemedicalexams/tsilva.yaml` with your settings:
 
 ```yaml
 name: tsilva
@@ -83,12 +83,12 @@ medicalexamsparser --profile tsilva
 
 ### Profiles
 
-All runtime configuration now lives in profile files stored in `~/.config/medicalexamsparser/`.
+All runtime configuration now lives in profile files stored in `~/.config/parsemedicalexams/`.
 
 ```bash
 # Create a profile from template
-mkdir -p ~/.config/medicalexamsparser
-cp profiles/template.yaml.example ~/.config/medicalexamsparser/myprofile.yaml
+mkdir -p ~/.config/parsemedicalexams
+cp profiles/template.yaml.example ~/.config/parsemedicalexams/myprofile.yaml
 
 # Run with profile
 medicalexamsparser --profile myprofile
@@ -216,7 +216,7 @@ parsemedicalexams/
 
 - **Two-phase processing**: Classify document first, then transcribe all pages
 - **Two-column naming**: `*_raw` (exact from document) + `*_standardized` (LLM-mapped)
-- **Persistent caching**: LLM standardization results cached in `~/.config/medicalexamsparser/cache/*.json`
+- **Persistent caching**: LLM standardization results cached in `~/.config/parsemedicalexams/cache/*.json`
 - **Editable caches**: Manually override cached values to fix misclassifications
 - **Self-contained profiles**: Each profile carries API, model, path, and patient context configuration
 - **Frequency-based date voting**: Handles multi-era documents (e.g., 2024 cover letter + 1997 records)
