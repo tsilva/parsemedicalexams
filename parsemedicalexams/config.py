@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import yaml
+from dotenv import dotenv_values
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,8 @@ DEFAULT_N_EXTRACTIONS = 1
 DEFAULT_MAX_WORKERS = 1
 DEFAULT_SUMMARIZE_MAX_INPUT_TOKENS = 100_000
 DEFAULT_INPUT_FILE_REGEX = r".*\.pdf"
+ENV_FILENAME = ".env"
+ENV_EXAMPLE_FILENAME = ".env.example"
 
 
 def _is_running_in_docker() -> bool:
@@ -46,6 +49,16 @@ def get_config_dir() -> Path:
 def get_cache_dir() -> Path:
     """Return the global cache directory used by the CLI."""
     return get_config_dir() / "cache"
+
+
+def get_env_path() -> Path:
+    """Return the shared .env path used by the CLI."""
+    return get_config_dir() / ENV_FILENAME
+
+
+def get_env_example_path() -> Path:
+    """Return the shared .env example path used by the CLI."""
+    return get_config_dir() / ENV_EXAMPLE_FILENAME
 
 
 def ensure_config_dir() -> Path:
@@ -80,6 +93,42 @@ def migrate_profiles(*source_dirs: Path) -> list[Path]:
             moved_files.append(target_path)
 
     return moved_files
+
+
+def migrate_env_file(*source_dirs: Path) -> Optional[Path]:
+    """Move a real .env file into the global config directory if needed."""
+    env_path = get_env_path()
+    if env_path.exists():
+        return env_path
+
+    for source_dir in source_dirs:
+        source_path = source_dir / ENV_FILENAME
+        if not source_path.exists():
+            continue
+        ensure_config_dir()
+        shutil.move(str(source_path), str(env_path))
+        return env_path
+
+    return None
+
+
+def sync_example_file(source_path: Path, target_path: Path) -> Path:
+    """Copy an example file into the config directory."""
+    ensure_config_dir()
+    shutil.copy2(source_path, target_path)
+    return target_path
+
+
+def load_shared_env(config_dir: Optional[Path] = None) -> dict[str, str]:
+    """Load shared model and credential settings from the config .env file."""
+    env_path = (config_dir or get_config_dir()) / ENV_FILENAME
+    if not env_path.exists():
+        return {}
+    return {
+        key: value
+        for key, value in dotenv_values(env_path).items()
+        if value is not None
+    }
 
 
 def _load_profile_data(profile_path: Path) -> dict[str, Any]:
@@ -133,7 +182,7 @@ def _resolve_profile_path(profile_path: Path, raw_path: Optional[str]) -> Option
 
 @dataclass
 class ProfileConfig:
-    """Configuration for a self-contained user profile."""
+    """Configuration for a user profile plus shared .env defaults."""
 
     name: str
     source_path: Path
@@ -227,9 +276,14 @@ class ProfileConfig:
                     openrouter.get("base_url"),
                     openrouter.get("openrouter_base_url"),
                     data.get("openrouter_base_url"),
-                    DEFAULT_OPENROUTER_BASE_URL,
                 )
-            ),
+            )
+            if _first_value(
+                openrouter.get("base_url"),
+                openrouter.get("openrouter_base_url"),
+                data.get("openrouter_base_url"),
+            )
+            else None,
             extract_model_id=_first_value(
                 models.get("extract_model_id"),
                 data.get("extract_model_id"),
@@ -245,7 +299,6 @@ class ProfileConfig:
             validation_model_id=_first_value(
                 models.get("validation_model_id"),
                 data.get("validation_model_id"),
-                DEFAULT_VALIDATION_MODEL_ID,
             ),
             n_extractions=_parse_positive_int(
                 _first_value(
@@ -312,34 +365,59 @@ class ExtractionConfig:
 
     @classmethod
     def from_profile(cls, profile: ProfileConfig) -> "ExtractionConfig":
-        """Build runtime configuration from a single self-contained profile."""
+        """Build runtime configuration from a profile plus shared .env settings."""
         if not profile.input_path:
             raise ValueError(f"Profile '{profile.name}' has no input_path defined.")
         if not profile.output_path:
             raise ValueError(f"Profile '{profile.name}' has no output_path defined.")
-        if not profile.openrouter_api_key:
+        shared_env = load_shared_env(profile.source_path.parent)
+
+        openrouter_api_key = (
+            profile.openrouter_api_key or shared_env.get("OPENROUTER_API_KEY")
+        )
+        if not openrouter_api_key:
             raise ValueError(
-                f"Profile '{profile.name}' has no openrouter_api_key defined."
+                f"Missing OPENROUTER_API_KEY in {get_env_path()}."
+                f" Copy {get_env_example_path()} to {get_env_path()} and fill it in."
             )
 
-        default_model = profile.model or DEFAULT_MODEL_ID
+        default_model = (
+            profile.model
+            or shared_env.get("EXTRACT_MODEL_ID")
+            or shared_env.get("MODEL_ID")
+            or DEFAULT_MODEL_ID
+        )
 
         return cls(
             input_path=profile.input_path,
             input_file_regex=profile.input_file_regex or DEFAULT_INPUT_FILE_REGEX,
             output_path=profile.output_path,
             self_consistency_model_id=(
-                profile.self_consistency_model_id or default_model
+                profile.self_consistency_model_id
+                or shared_env.get("SELF_CONSISTENCY_MODEL_ID")
+                or default_model
             ),
-            extract_model_id=profile.extract_model_id or default_model,
-            summarize_model_id=profile.summarize_model_id or default_model,
+            extract_model_id=(
+                profile.extract_model_id
+                or shared_env.get("EXTRACT_MODEL_ID")
+                or default_model
+            ),
+            summarize_model_id=(
+                profile.summarize_model_id
+                or shared_env.get("SUMMARIZE_MODEL_ID")
+                or default_model
+            ),
             n_extractions=profile.n_extractions,
-            openrouter_api_key=profile.openrouter_api_key,
+            openrouter_api_key=openrouter_api_key,
             openrouter_base_url=resolve_base_url(
-                profile.openrouter_base_url or DEFAULT_OPENROUTER_BASE_URL
+                profile.openrouter_base_url
+                or shared_env.get("OPENROUTER_BASE_URL")
+                or DEFAULT_OPENROUTER_BASE_URL
             ),
             validation_model_id=(
-                profile.validation_model_id or DEFAULT_VALIDATION_MODEL_ID
+                profile.validation_model_id
+                or shared_env.get("VALIDATION_MODEL_ID")
+                or DEFAULT_VALIDATION_MODEL_ID
             ),
             max_workers=profile.max_workers,
             summarize_max_input_tokens=profile.summarize_max_input_tokens,

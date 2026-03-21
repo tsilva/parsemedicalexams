@@ -29,7 +29,14 @@ from . import (
     setup_logging,
     extract_dates_from_text,
 )
-from .config import LEGACY_CONFIG_DIR, ensure_config_dir, migrate_profiles
+from .config import (
+    LEGACY_CONFIG_DIR,
+    ensure_config_dir,
+    get_env_example_path,
+    migrate_env_file,
+    migrate_profiles,
+    sync_example_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1017,10 +1024,15 @@ def main():
     """Main pipeline entry point."""
     args = parse_args()
     config_dir = ensure_config_dir()
+    repo_root = Path(__file__).resolve().parent.parent
     moved_profiles = migrate_profiles(LEGACY_CONFIG_DIR)
+    migrated_env = migrate_env_file(LEGACY_CONFIG_DIR, repo_root)
+    sync_example_file(repo_root / ".env.example", get_env_example_path())
 
     if moved_profiles:
         print(f"Moved {len(moved_profiles)} profile file(s) into {config_dir}")
+    if migrated_env:
+        print(f"Moved shared .env into {migrated_env}")
 
     if args.list_profiles:
         profiles = ProfileConfig.list_profiles()

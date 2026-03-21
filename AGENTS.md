@@ -52,7 +52,8 @@ medicalexamsparser -p tiago -d exam_2024.pdf --page 2
 - **utils.py**: Image preprocessing, logging setup, JSON parsing utilities
 
 ### Configuration
-- `~/.config/parsemedicalexams/*.yaml|json`: User-specific self-contained profiles
+- `~/.config/parsemedicalexams/.env`: Shared OpenRouter key and model IDs
+- `~/.config/parsemedicalexams/*.yaml|json`: User-specific profile files (paths, filters, patient context)
 - `~/.config/parsemedicalexams/cache/*.json`: LLM response caches (user-editable for overrides)
 - `prompts/*.md`: All LLM prompts externalized as markdown files
 

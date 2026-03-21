@@ -42,17 +42,26 @@ uv tool install . --editable
 
 ```bash
 mkdir -p ~/.config/parsemedicalexams
+cp .env.example ~/.config/parsemedicalexams/.env
 cp profiles/template.yaml.example ~/.config/parsemedicalexams/tsilva.yaml
 ```
 
-Edit `~/.config/parsemedicalexams/tsilva.yaml` with your settings:
+Edit `~/.config/parsemedicalexams/.env` with your shared model/API settings:
+
+```dotenv
+OPENROUTER_API_KEY=your_api_key_here
+EXTRACT_MODEL_ID=google/gemini-2.5-flash
+SUMMARIZE_MODEL_ID=google/gemini-2.5-flash
+SELF_CONSISTENCY_MODEL_ID=google/gemini-2.5-flash
+VALIDATION_MODEL_ID=anthropic/claude-haiku-4.5
+```
+
+Then edit `~/.config/parsemedicalexams/tsilva.yaml` with your profile-specific settings:
 
 ```yaml
 name: tsilva
-openrouter_api_key: your_api_key_here
 input_path: /path/to/your/exam/pdfs
 output_path: /path/to/output
-model: google/gemini-2.5-flash
 workers: 4
 ```
 
@@ -83,11 +92,14 @@ medicalexamsparser --profile tsilva
 
 ### Profiles
 
-All runtime configuration now lives in profile files stored in `~/.config/parsemedicalexams/`.
+Runtime configuration is split across:
+- `~/.config/parsemedicalexams/.env` for shared API/model settings
+- `~/.config/parsemedicalexams/*.yaml|json` for per-profile paths and patient context
 
 ```bash
-# Create a profile from template
+# Create the shared env file and a profile
 mkdir -p ~/.config/parsemedicalexams
+cp .env.example ~/.config/parsemedicalexams/.env
 cp profiles/template.yaml.example ~/.config/parsemedicalexams/myprofile.yaml
 
 # Run with profile
@@ -101,18 +113,25 @@ Profiles can be YAML or JSON. A flat YAML profile looks like this:
 
 ```yaml
 name: myprofile
-openrouter_api_key: your_api_key_here
 input_path: /path/to/input
 output_path: /path/to/output
 input_file_regex: ".*\\.pdf"
-model: google/gemini-2.5-flash
 workers: 4
 n_extractions: 3
-validation_model_id: anthropic/claude-haiku-4.5
 summarize_max_input_tokens: 100000
 full_name: "Patient Name"
 birth_date: "1980-01-31"
 locale: "pt-PT"
+```
+
+Shared `.env` file:
+
+```dotenv
+OPENROUTER_API_KEY=your_api_key_here
+EXTRACT_MODEL_ID=google/gemini-2.5-flash
+SUMMARIZE_MODEL_ID=google/gemini-2.5-flash
+SELF_CONSISTENCY_MODEL_ID=google/gemini-2.5-flash
+VALIDATION_MODEL_ID=anthropic/claude-haiku-4.5
 ```
 
 ### CLI Options
@@ -218,7 +237,7 @@ parsemedicalexams/
 - **Two-column naming**: `*_raw` (exact from document) + `*_standardized` (LLM-mapped)
 - **Persistent caching**: LLM standardization results cached in `~/.config/parsemedicalexams/cache/*.json`
 - **Editable caches**: Manually override cached values to fix misclassifications
-- **Self-contained profiles**: Each profile carries API, model, path, and patient context configuration
+- **Shared env + per-profile config**: `.env` carries shared credentials/model defaults while profiles carry paths and patient context
 - **Frequency-based date voting**: Handles multi-era documents (e.g., 2024 cover letter + 1997 records)
 
 ## Requirements

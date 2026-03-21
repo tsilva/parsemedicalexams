@@ -24,6 +24,7 @@ dependencies = [
     "openai",
     "pillow",
     "pdf2image",
+    "python-dotenv",
     "pydantic",
     "pyyaml",
     "tqdm",
