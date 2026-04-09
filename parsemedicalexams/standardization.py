@@ -5,7 +5,7 @@ import logging
 from openai import OpenAI
 
 from .config import get_cache_dir
-from .utils import parse_llm_json_response, load_prompt
+from .utils import parse_llm_json_response, load_prompt, extract_completion_text
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ def standardize_exam_types(
                 logger.error("Invalid completion response for exam standardization")
                 llm_result = {}
             else:
-                response_text = completion.choices[0].message.content.strip()
+                response_text = extract_completion_text(completion, "exam standardization")
                 llm_result = parse_llm_json_response(response_text, fallback={})
 
             # Update cache with LLM results

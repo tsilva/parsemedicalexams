@@ -9,6 +9,7 @@ from PIL import Image, ImageEnhance
 
 # Prompts directory
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
+logger = logging.getLogger(__name__)
 
 
 def load_prompt(name: str) -> str:
@@ -51,6 +52,34 @@ def parse_llm_json_response(text: str, fallback: Any = None) -> Any:
         return json.loads(text)
     except json.JSONDecodeError:
         return fallback
+
+
+def extract_completion_text(completion: Any, context: str) -> str:
+    """Safely extract stripped text content from a chat completion."""
+    if not completion:
+        logger.error(f"Missing completion response for {context}")
+        return ""
+
+    choices = getattr(completion, "choices", None)
+    if not choices:
+        logger.error(f"Missing completion choices for {context}")
+        return ""
+
+    message = getattr(choices[0], "message", None)
+    if message is None:
+        logger.warning(f"Missing completion message for {context}")
+        return ""
+
+    content = getattr(message, "content", None)
+    if content is None:
+        logger.warning(f"Missing completion content for {context}")
+        return ""
+
+    if not isinstance(content, str):
+        logger.warning(f"Non-string completion content for {context}: {type(content).__name__}")
+        return ""
+
+    return content.strip()
 
 
 def extract_dates_from_text(text: str) -> list[str]:

@@ -62,13 +62,41 @@ def _transcription_files(doc_dir: Path, doc_stem: str) -> list[Path]:
     ]
 
 
-def is_document_processed(pdf_path: Path, output_path: Path) -> bool:
-    """Check if a PDF has already been processed by looking for transcription .md files."""
+def get_document_output_issue(pdf_path: Path, output_path: Path) -> str | None:
+    """Return why a document output is incomplete, or None when it is complete."""
     doc_stem = pdf_path.stem
     doc_output_dir = output_path / doc_stem
     if not doc_output_dir.exists():
-        return False
-    return len(_transcription_files(doc_output_dir, doc_stem)) > 0
+        return "missing output folder"
+
+    copied_pdf = doc_output_dir / pdf_path.name
+    if not copied_pdf.exists():
+        return "missing copied source PDF"
+
+    transcription_files = _transcription_files(doc_output_dir, doc_stem)
+    if not transcription_files:
+        return "missing transcription markdown files"
+
+    jpg_files = list(doc_output_dir.glob(f"{doc_stem}.*.jpg"))
+    if not jpg_files:
+        return "missing page images"
+
+    if len(jpg_files) != len(transcription_files):
+        return (
+            f"page count mismatch ({len(jpg_files)} images, "
+            f"{len(transcription_files)} transcriptions)"
+        )
+
+    summary_path = doc_output_dir / f"{doc_stem}.summary.md"
+    if not summary_path.exists():
+        return "missing document summary"
+
+    return None
+
+
+def is_document_processed(pdf_path: Path, output_path: Path) -> bool:
+    """Check if a PDF already has a complete output bundle."""
+    return get_document_output_issue(pdf_path, output_path) is None
 
 
 def build_exam_frontmatter(exam: dict, extra_fields: dict = None) -> dict:
@@ -927,10 +955,14 @@ def run_profile(profile_name: str, args) -> bool:
         # Check for already processed files
         to_process = []
         for pdf_path in pdf_files:
-            if is_document_processed(pdf_path, config.output_path):
+            output_issue = get_document_output_issue(pdf_path, config.output_path)
+            if output_issue is None:
                 logger.info(f"Skipping (already processed): {pdf_path.name}")
                 already_processed += 1
             else:
+                logger.info(
+                    f"Reprocessing incomplete output: {pdf_path.name} ({output_issue})"
+                )
                 to_process.append(pdf_path)
 
         logger.info(

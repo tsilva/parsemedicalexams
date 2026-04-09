@@ -3,7 +3,7 @@
 import logging
 from openai import OpenAI
 
-from .utils import load_prompt
+from .utils import load_prompt, extract_completion_text
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ def _llm_summarize(messages: list[dict], model_id: str, client: OpenAI) -> str:
     if not completion or not completion.choices:
         logger.error("Invalid completion response for summarization")
         return ""
-    return completion.choices[0].message.content.strip()
+    return extract_completion_text(completion, "summarization")
 
 
 def summarize_document(

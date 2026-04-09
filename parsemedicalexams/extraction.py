@@ -16,6 +16,7 @@ from .utils import (
     load_prompt,
     strip_markdown_fences,
     extract_dates_from_text,
+    extract_completion_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -127,7 +128,10 @@ def vote_on_best_result(results: list, model_id: str, fn_name: str, client: Open
                 {"role": "user", "content": prompt},
             ],
         )
-        voted_raw = completion.choices[0].message.content.strip()
+        voted_raw = extract_completion_text(completion, f"self-consistency voting for {fn_name}")
+        if not voted_raw:
+            logger.warning(f"Empty voting response for {fn_name}, falling back to first result")
+            return results[0], results
         return voted_raw, results
 
     except Exception as e:
@@ -380,7 +384,10 @@ Is this a refusal to transcribe medical content? Reply with only "yes" or "no"."
             temperature=0,
             max_tokens=10,
         )
-        result = response.choices[0].message.content.strip().lower()
+        result = extract_completion_text(response, "refusal check").lower()
+        if not result:
+            logger.warning("Empty refusal check response, assuming transcription is valid")
+            return (True, "ok")
         if "yes" in result:
             return (False, "refusal")
     except Exception as e:
@@ -439,7 +446,10 @@ def score_transcription_confidence(
                 {"role": "user", "content": user_prompt},
             ],
         )
-        response = completion.choices[0].message.content.strip()
+        response = extract_completion_text(completion, "confidence scoring")
+        if not response:
+            logger.warning("Empty confidence scoring response, using neutral fallback")
+            return 0.5
 
         # Parse JSON response
         result = parse_llm_json_response(response, fallback=None)
