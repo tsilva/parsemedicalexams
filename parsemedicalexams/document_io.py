@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 import re
 import shutil
 import subprocess
@@ -241,16 +242,33 @@ def remove_skip_marker(doc_output_dir: Path) -> None:
 
 
 def pdf_copy_is_current(source_pdf: Path, copied_pdf: Path) -> bool:
-    """Return True when the copied PDF still matches the source PDF metadata."""
+    """Return True when the copied PDF still matches the source PDF bytes."""
     if not copied_pdf.exists():
         return False
 
     source_stat = source_pdf.stat()
     copied_stat = copied_pdf.stat()
-    return (
-        source_stat.st_size == copied_stat.st_size
-        and source_stat.st_mtime_ns == copied_stat.st_mtime_ns
-    )
+    if source_stat.st_size != copied_stat.st_size:
+        return False
+    if source_stat.st_mtime_ns == copied_stat.st_mtime_ns:
+        return True
+    return _files_have_same_content(source_pdf, copied_pdf)
+
+
+def _files_have_same_content(source_path: Path, other_path: Path) -> bool:
+    """Compare two files by content without loading them fully into memory."""
+    return _sha256_digest(source_path) == _sha256_digest(other_path)
+
+
+def _sha256_digest(path: Path) -> bytes:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.digest()
 
 
 def count_pdf_pages(pdf_path: Path) -> int:
@@ -360,7 +378,11 @@ def frontmatter_to_exam(
 def _validate_existing_transcription_file(md_path: Path) -> list[str]:
     frontmatter, transcription = parse_frontmatter(md_path.read_text(encoding="utf-8"))
     doc_stem = md_path.name.rsplit(".", 2)[0]
-    problems = validate_metadata_frontmatter(md_path, doc_stem, frontmatter)
+    problems = [
+        problem
+        for problem in validate_metadata_frontmatter(md_path, doc_stem, frontmatter)
+        if problem != "missing_prompt_variant"
+    ]
     inferred_page_kind, inferred_chart_type, _ = determine_page_strategy(
         transcription,
         document_exam_name=frontmatter.get("exam_name_raw", ""),

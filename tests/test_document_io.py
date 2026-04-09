@@ -1,4 +1,5 @@
 import sys
+import os
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -76,6 +77,59 @@ def test_get_document_output_issue_detects_changed_source_pdf(tmp_path):
         get_document_output_issue(source_pdf, output_path)
         == "source PDF changed since last processing"
     )
+
+
+def test_get_document_output_issue_ignores_metadata_only_pdf_changes(tmp_path):
+    source_pdf = tmp_path / "exam.pdf"
+    source_pdf.write_bytes(b"same-source")
+
+    output_path = tmp_path / "out"
+    doc_dir = output_path / "exam"
+    doc_dir.mkdir(parents=True)
+    copied_pdf = doc_dir / "exam.pdf"
+    shutil.copy2(source_pdf, copied_pdf)
+
+    new_mtime = source_pdf.stat().st_mtime + 5
+    os.utime(source_pdf, (new_mtime, new_mtime))
+
+    (doc_dir / ".skip").write_text(
+        "status: skipped\nsource: exam.pdf\nreason: not a medical exam\n",
+        encoding="utf-8",
+    )
+
+    assert get_document_output_issue(source_pdf, output_path) is None
+
+
+def test_get_document_output_issue_accepts_legacy_transcription_without_prompt_variant(
+    tmp_path, monkeypatch
+):
+    source_pdf = tmp_path / "exam.pdf"
+    source_pdf.write_bytes(b"source")
+    monkeypatch.setattr("parsemedicalexams.document_io.count_pdf_pages", lambda _: 1)
+
+    output_path = tmp_path / "out"
+    doc_dir = output_path / source_pdf.stem
+    doc_dir.mkdir(parents=True)
+    shutil.copy2(source_pdf, doc_dir / source_pdf.name)
+    (doc_dir / "exam.001.jpg").write_bytes(b"jpg")
+    write_markdown_with_frontmatter(
+        doc_dir / "exam.001.md",
+        {
+            "exam_date": "2024-01-15",
+            "exam_name_raw": "Legacy exam",
+            "title": "Legacy exam",
+            "category": "other",
+            "page": 1,
+            "source": "exam.pdf",
+        },
+        "Legacy transcription body long enough to pass content checks.\n",
+    )
+    (doc_dir / "exam.summary.md").write_text(
+        "---\nexam_date: '2024-01-15'\nexam_name_raw: Summary\ntitle: Summary\ncategory: other\n---\n\nLegacy summary body long enough to satisfy summary validation.\n",
+        encoding="utf-8",
+    )
+
+    assert get_document_output_issue(source_pdf, output_path) is None
 
 
 def test_extract_doc_date_prefix_reads_prefix():
