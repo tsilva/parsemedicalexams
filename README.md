@@ -140,10 +140,10 @@ VALIDATION_MODEL_ID=anthropic/claude-haiku-4.5
 |--------|-------------|
 | `--profile`, `-p` | Profile name to use |
 | `--list-profiles` | List available profiles |
-| `--regenerate` | Regenerate markdown files from existing JSON data |
+| `--regenerate` | Regenerate summaries from existing transcription markdown files |
 | `--reprocess-all` | Force reprocess all documents |
 | `--document`, `-d` | Process only this document (filename or stem) |
-| `--page` | Process only this page number (requires `--document`) |
+| `--page` | Reserved for future safe page-only rebuilds; currently rejected by the CLI |
 | `--model`, `-m` | Override model ID |
 | `--workers`, `-w` | Override worker count |
 | `--pattern` | Override input file regex |
@@ -162,9 +162,6 @@ medicalexamsparser --profile tsilva --reprocess-all
 
 # Reprocess a specific document
 medicalexamsparser -p tsilva -d exam_2024.pdf
-
-# Reprocess a specific page within a document
-medicalexamsparser -p tsilva -d exam_2024.pdf --page 2
 ```
 
 ## Output Format
@@ -188,7 +185,7 @@ Each `.md` file contains YAML frontmatter with metadata followed by the verbatim
 
 ```yaml
 ---
-date: 2024-01-15
+exam_date: 2024-01-15
 title: "Chest X-Ray PA and Lateral"
 category: imaging
 exam_name_raw: "RX TORAX PA Y LAT"
@@ -206,7 +203,7 @@ source: exam_2024.pdf
 
 | Field | Description |
 |-------|-------------|
-| `date` | Exam date (YYYY-MM-DD) |
+| `exam_date` | Exam date (YYYY-MM-DD) |
 | `title` | Standardized exam name (English) |
 | `category` | Exam type: `imaging`, `ultrasound`, `endoscopy`, `other` |
 | `exam_name_raw` | Exam name exactly as written in document |
@@ -221,12 +218,16 @@ source: exam_2024.pdf
 
 ```
 parsemedicalexams/
-├── main.py              # Pipeline orchestration, CLI handling
+├── cli.py               # Thin CLI entrypoint: args, bootstrap, profile loop
+├── pipeline.py          # Run-mode resolution, document selection, orchestration
+├── document_io.py       # Frontmatter, output audit, PDF text/image helpers
 ├── extraction.py        # Pydantic models, Vision LLM extraction, voting
 ├── standardization.py   # Exam type classification with JSON cache
 ├── summarization.py     # Document-level clinical summarization
 ├── config.py            # ExtractionConfig/ProfileConfig (global profile config)
 ├── utils.py             # Image preprocessing, logging, JSON utilities
+├── __main__.py          # Package entrypoint shim
+├── ../main.py           # Backward-compatibility shim
 ├── prompts/             # Externalized LLM prompts as markdown
 └── profiles/            # Example profile template
 ```

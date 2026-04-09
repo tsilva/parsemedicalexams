@@ -3,7 +3,9 @@
 __version__ = "0.2.0"
 
 from .config import ExtractionConfig, ProfileConfig
+from .document_io import extract_pdf_page_text
 from .extraction import (
+    build_chart_user_prompt,
     transcribe_with_retry,
     self_consistency,
     classify_document,
@@ -23,6 +25,8 @@ __all__ = [
     "__version__",
     "ExtractionConfig",
     "ProfileConfig",
+    "build_chart_user_prompt",
+    "extract_pdf_page_text",
     "transcribe_with_retry",
     "self_consistency",
     "classify_document",

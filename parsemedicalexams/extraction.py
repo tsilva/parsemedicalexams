@@ -10,13 +10,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pydantic import BaseModel, Field
 from openai import OpenAI, APIError
 
-from .config import resolve_base_url
 from .utils import (
     parse_llm_json_response,
     load_prompt,
     strip_markdown_fences,
     extract_dates_from_text,
     extract_completion_text,
+)
+from .validation import (
+    first_blocking_issue,
+    validate_page_output,
 )
 
 logger = logging.getLogger(__name__)
@@ -211,6 +214,8 @@ def transcribe_page(
     client: OpenAI,
     temperature: float = 0.1,
     prompt_variant: str = "transcription_system",
+    user_prompt_name: str = "transcription_user",
+    user_prompt_text: str = "",
     profile_context: str = "",
 ) -> str:
     """
@@ -232,7 +237,7 @@ def transcribe_page(
 
     system_prompt = load_prompt(prompt_variant)
     system_prompt = system_prompt.format(patient_context=profile_context)
-    user_prompt = load_prompt("transcription_user")
+    user_prompt = user_prompt_text or load_prompt(user_prompt_name)
 
     try:
         completion = client.chat.completions.create(
@@ -279,6 +284,14 @@ def transcribe_page(
 
     return content
 
+def build_chart_user_prompt(chart_type: str, embedded_text: str) -> str:
+    """Build chart extraction prompt with embedded-text context."""
+    prompt = load_prompt("chart_transcription_user")
+    embedded_excerpt = embedded_text.strip()
+    if len(embedded_excerpt) > 3000:
+        embedded_excerpt = embedded_excerpt[:3000]
+    return prompt.format(chart_type=chart_type, embedded_text=embedded_excerpt or "[none]")
+
 
 # Prompt variants for retry on transcription refusal
 TRANSCRIPTION_PROMPT_VARIANTS = [
@@ -297,6 +310,11 @@ def transcribe_with_retry(
     temperature: float = 0.1,
     profile_context: str = "",
     max_retries: int = 3,
+    page_kind: str = "text",
+    chart_type: str | None = None,
+    prompt_variants: list[str] | None = None,
+    user_prompt_name: str = "transcription_user",
+    user_prompt_text: str = "",
 ) -> tuple[str, str, int]:
     """
     Transcribe page with automatic retry on refusal using different prompt variants.
@@ -313,11 +331,15 @@ def transcribe_with_retry(
     Returns:
         Tuple of (transcription_text, prompt_variant_used, attempts_made)
     """
-    for attempt, prompt_variant in enumerate(TRANSCRIPTION_PROMPT_VARIANTS[: max_retries + 1]):
+    variants = prompt_variants or TRANSCRIPTION_PROMPT_VARIANTS
+    transcription = ""
+    last_prompt_variant = variants[0]
+    for attempt, prompt_variant in enumerate(variants[: max_retries + 1]):
         try:
             logger.debug(
                 f"Transcription attempt {attempt + 1} using {prompt_variant} for {image_path.name}"
             )
+            last_prompt_variant = prompt_variant
 
             transcription = transcribe_page(
                 image_path=image_path,
@@ -325,11 +347,19 @@ def transcribe_with_retry(
                 client=client,
                 temperature=temperature,
                 prompt_variant=prompt_variant,
+                user_prompt_name=user_prompt_name,
+                user_prompt_text=user_prompt_text,
                 profile_context=profile_context,
             )
 
-            # Check if transcription is valid (not a refusal)
-            is_valid, reason = validate_transcription(transcription, validation_model_id, client)
+            # Check if transcription is valid (not a refusal or other invalid output)
+            is_valid, reason = validate_transcription(
+                transcription,
+                validation_model_id,
+                client,
+                page_kind=page_kind,
+                chart_type=chart_type,
+            )
 
             if is_valid:
                 if attempt > 0:
@@ -339,9 +369,9 @@ def transcribe_with_retry(
                     )
                 return transcription, prompt_variant, attempt + 1
 
-            # If refusal detected, try next variant
+            # Retry on any retryable invalid output
             logger.warning(
-                f"Transcription refusal detected ({reason}) with {prompt_variant} "
+                f"Transcription validation failure ({reason}) with {prompt_variant} "
                 f"for {image_path.name}, trying alternative prompt..."
             )
 
@@ -354,14 +384,29 @@ def transcribe_with_retry(
         f"All {max_retries + 1} prompt variants failed for {image_path.name}. "
         f"Returning last transcription."
     )
-    return transcription, TRANSCRIPTION_PROMPT_VARIANTS[0], max_retries + 1
+    return transcription, last_prompt_variant, max_retries + 1
 
 
-def validate_transcription(transcription: str, model_id: str, client: OpenAI) -> tuple[bool, str]:
-    """Returns (is_valid, reason). Uses LLM to check if transcription is a refusal."""
+def validate_transcription(
+    transcription: str,
+    model_id: str,
+    client: OpenAI,
+    page_kind: str = "text",
+    chart_type: str | None = None,
+) -> tuple[bool, str]:
+    """Returns (is_valid, reason). Uses local validation plus LLM refusal detection."""
     # Empty or too short
     if not transcription or len(transcription.strip()) < 20:
         return (False, "empty")
+
+    issues = validate_page_output(
+        transcription,
+        page_kind=page_kind,
+        chart_type=chart_type,
+    )
+    blocking_issue = first_blocking_issue(issues)
+    if blocking_issue:
+        return (False, blocking_issue.kind)
 
     # Use LLM to detect refusal
     prompt = (

@@ -25,6 +25,7 @@ This skill performs comprehensive quality assessment of document extraction pipe
 - Output files contain metadata (YAML frontmatter, JSON, or similar)
 
 **Expected Time:**
+- Phase 0 (Sentinel scan): 1-3 minutes
 - Phase 1 (Inventory): 5-10 minutes
 - Phase 2 (Sampling): 2-5 minutes
 - Phase 3 (Verification): 2-4 hours for 25-30 documents
@@ -34,6 +35,10 @@ This skill performs comprehensive quality assessment of document extraction pipe
 ## Quick Start
 
 ```bash
+# 0. Run sentinel scan for hard failures and non-transcription output
+python scripts/sentinel_scan.py \
+  --output-dir /path/to/extraction/outputs
+
 # 1. Configure paths in generate_inventory.py
 python ~/.Codex/skills/extraction-quality-audit/scripts/generate_inventory.py \
   --input-dir /path/to/source/documents \
@@ -56,6 +61,34 @@ python ~/.Codex/skills/extraction-quality-audit/scripts/report_generator.py \
   --results verification_results.json \
   --output QUALITY_REPORT.md
 ```
+
+## Phase 0: Sentinel Failure Scan
+
+**Purpose:** Catch systemic extraction failures before spending tokens on sampling and page-by-page review.
+
+**What it does:**
+- Scans extraction outputs for known hard-failure strings and non-document narration
+- Counts affected files and documents
+- Surfaces examples immediately so they can be promoted into the audit sample
+- Reduces wasted effort on documents already known to be broken
+
+**Script:** `scripts/sentinel_scan.py`
+
+**Usage:**
+```bash
+python scripts/sentinel_scan.py \
+  --output-dir /path/to/extraction/outputs
+```
+
+**Default sentinel patterns:**
+- API / pipeline failure strings such as `Request too large. Try with a smaller file.`
+- Model narration such as `This image shows`, `No readable text is visible on this page`, `The following text elements are partially visible`, or `The remaining technical parameters`
+- Placeholder institution text such as `Unknown Institution`
+
+**Triage rule:**
+- If sentinel failures exist, report their counts first.
+- Promote every affected document into the working sample before random fill.
+- Treat literal failure strings in page outputs or summaries as confirmed extraction failures, not low-confidence warnings.
 
 ## Phase 1: Document Inventory
 
@@ -204,43 +237,48 @@ python scripts/verification_framework.py \
 
 For each document in sample:
 
-1. **Load Files:**
+1. **Run sentinel check first:**
+   - Search the document's outputs for known failure strings or narration
+   - If found, record the failure type before deeper review
+   - Do not spend time scoring obvious hard failures as if they were normal OCR noise
+
+2. **Load Files:**
    - Read source document (PDF, image, etc.) using Codex's vision
    - Read all extraction output files (pages, summaries)
 
-2. **Verify Metadata Accuracy (Score 0-10):**
+3. **Verify Metadata Accuracy (Score 0-10):**
    - Date correctness
    - Document title/name accuracy
    - Category classification
    - Facility, doctor, department names
    - Other structured fields
 
-3. **Verify Transcription Quality (Score 0-10):**
+4. **Verify Transcription Quality (Score 0-10):**
    - **Completeness:** All text captured? (Score 0-10)
    - **Accuracy:** Text matches source? (Score 0-10)
    - **Layout:** Structure preserved? (Score 0-10)
    - Document specific issues
 
-4. **Verify Domain-Specific Terminology:**
+5. **Verify Domain-Specific Terminology:**
    - Medical: Anatomical terms, diagnostic phrases, measurements
    - Legal: Contract clauses, case citations, legal entities
    - Financial: Accounting terms, currency handling
    - Technical: Code snippets, API references, formulas
    - **Rating:** Excellent/Good/Fair/Poor
 
-5. **Verify Summary Quality (Score 0-10):**
+6. **Verify Summary Quality (Score 0-10):**
    - Completeness of key information
    - Accuracy of summary content
    - Appropriate level of detail
    - No hallucinations
 
-6. **Multi-Page Coherence (for multi-page docs):**
+7. **Multi-Page Coherence (for multi-page docs):**
    - Metadata consistency across pages
    - Page numbering accuracy
    - No duplicate content
    - Cross-page references preserved
 
-7. **Low Confidence Investigation (for LOW_CONF docs):**
+8. **Low Confidence Investigation (for LOW_CONF docs):**
    - Identify root cause of low confidence
    - Assess if confidence is justified
    - Determine if extraction quality is still acceptable

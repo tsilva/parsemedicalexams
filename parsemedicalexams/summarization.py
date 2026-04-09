@@ -4,6 +4,7 @@ import logging
 from openai import OpenAI
 
 from .utils import load_prompt, extract_completion_text
+from .validation import first_blocking_issue, validate_summary_output
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,15 @@ def summarize_document(
     if not exams:
         return ""
 
-    exams_with_content = [e for e in exams if e.get("transcription", "").strip()]
+    exams_with_content = [
+        e
+        for e in exams
+        if e.get("transcription", "").strip()
+        and (
+            e.get("validation_status") == "ok"
+            or e.get("chart_data_status") == "non_discrete_visual"
+        )
+    ]
     if not exams_with_content:
         return ""
 
@@ -72,14 +81,29 @@ def summarize_document(
     fixed_overhead_tokens = _estimate_tokens(system_prompt) + 200
     content_budget = max_input_tokens - fixed_overhead_tokens
 
-    return _incremental_summarize(
-        exams_with_content,
-        system_prompt,
-        user_prompt_template,
-        content_budget,
-        model_id,
-        client,
-    )
+    attempts = 2
+    running_summary = ""
+    for attempt in range(1, attempts + 1):
+        running_summary = _incremental_summarize(
+            exams_with_content,
+            system_prompt,
+            user_prompt_template,
+            content_budget,
+            model_id,
+            client,
+        )
+        issues = validate_summary_output(running_summary)
+        blocking_issue = first_blocking_issue(issues)
+        if not blocking_issue:
+            return running_summary
+        logger.warning(
+            "Summary validation failure on attempt %s/%s: %s",
+            attempt,
+            attempts,
+            blocking_issue.kind,
+        )
+
+    return ""
 
 
 def _incremental_summarize(

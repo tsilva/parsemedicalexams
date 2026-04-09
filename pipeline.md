@@ -11,7 +11,7 @@ The pipeline converts PDF medical exam documents into structured markdown files.
 6. saves per-page `.md` files with YAML frontmatter
 7. generates a comprehensive `.summary.md` via incremental chunked summarization
 
-Entry point: `main.py → run_profile() → process_single_pdf()`.
+Entry point: `parsemedicalexams.cli:main() → parsemedicalexams.pipeline.run_profile() → process_single_pdf()`.
 
 ---
 
@@ -46,7 +46,7 @@ Profiles override `.env` paths and optionally model/workers. Fields: `name`, `in
 
 ### Step 1: PDF to Images
 
-**Location:** `main.py → process_single_pdf()`
+**Location:** `pipeline.py → process_single_pdf()`
 
 ```
 pdf2image.convert_from_path(str(pdf_path))       # PIL Image per page
@@ -89,7 +89,7 @@ The response is parsed into `DocumentClassification`:
 | `physician_name` | Signing physician |
 | `department` | Department/service |
 
-**Fail-open:** errors and missing tool calls default to `is_exam=True`. Non-exams return `"skipped"` and are not processed further. Classification is skipped when `--page` is used.
+**Fail-open:** errors and missing tool calls default to `is_exam=True`. Non-exams return `"skipped"` and are not processed further. The CLI currently rejects `--page` before orchestration begins.
 
 **Prompts:** `prompts/classification_system.md` (formatted with `{patient_context}`), `prompts/classification_user.md`
 
@@ -97,7 +97,7 @@ The response is parsed into `DocumentClassification`:
 
 ### Step 3: Per-Page Transcription
 
-**Location:** `main.py → process_page()` (inner function), called in parallel via `ThreadPoolExecutor(max_workers)`
+**Location:** `pipeline.py → process_page()` (inner function), called in parallel via `ThreadPoolExecutor(max_workers)`
 
 Two modes depending on `N_EXTRACTIONS`:
 
@@ -148,7 +148,7 @@ client.chat.completions.create(
 
 ### Step 4: Date Correction
 
-**Location:** `main.py → select_most_frequent_date()`
+**Location:** `pipeline.py → select_most_frequent_date()`
 
 After all pages are transcribed, a frequency vote selects the document date:
 
@@ -201,7 +201,7 @@ Cache is saved after each batch. Failures fall back to `exam_type="other"` with 
 
 ### Step 6: Save Transcriptions
 
-**Location:** `main.py → save_transcription_file()`
+**Location:** `document_io.py → save_transcription_file()`
 
 Output file: `{output_path}/{doc_stem}/{doc_stem}.{page_num:03d}.md`
 
