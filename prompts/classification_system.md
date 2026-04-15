@@ -29,6 +29,7 @@ IMPORTANT: When in doubt, classify as EXAM. It's better to transcribe something 
 
 Extract the following information:
 - is_exam: true/false
+- reason: brief explanation for the decision, especially when is_exam is false (e.g., "invoice only, no clinical content")
 - exam_name_raw: The document title or exam name exactly as written (e.g., "CABELO: NUTRIENTES E METAIS TÓXICOS")
 - exam_date: The date the exam was performed or report was issued (YYYY-MM-DD)
 - facility_name: Healthcare facility name (e.g., "SYNLAB", "Hospital Santo António")

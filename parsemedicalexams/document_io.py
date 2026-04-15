@@ -250,7 +250,8 @@ def pdf_copy_is_current(source_pdf: Path, copied_pdf: Path) -> bool:
     copied_stat = copied_pdf.stat()
     if source_stat.st_size != copied_stat.st_size:
         return False
-    if source_stat.st_mtime_ns == copied_stat.st_mtime_ns:
+    # Cloud-backed filesystems can preserve mtimes with tiny rounding drift.
+    if abs(source_stat.st_mtime_ns - copied_stat.st_mtime_ns) <= 1_000:
         return True
     return _files_have_same_content(source_pdf, copied_pdf)
 
@@ -728,6 +729,21 @@ def validate_pipeline_outputs(pdf_files: list[Path], output_path: Path) -> list[
     return issues
 
 
+def validate_orphan_output_dirs(output_path: Path, input_path: Path) -> list[str]:
+    """Validate that every output document directory maps to a source PDF in input_path."""
+    if not output_path.exists():
+        return []
+
+    source_doc_stems = {pdf_path.stem for pdf_path in input_path.glob("**/*.pdf")}
+    issues: list[str] = []
+    for doc_dir in output_path.iterdir():
+        if not doc_dir.is_dir() or doc_dir.name == "logs":
+            continue
+        if doc_dir.name not in source_doc_stems:
+            issues.append(f"{doc_dir.name}: output directory has no matching source PDF")
+    return sorted(issues)
+
+
 def validate_frontmatter(output_path: Path) -> list[str]:
     """Validate that all .md files have YAML frontmatter with required fields."""
     issues = []
@@ -755,3 +771,21 @@ def validate_frontmatter(output_path: Path) -> list[str]:
                 else:
                     issues.append(f"{problem}: {md_path.name}")
     return issues
+
+
+def collect_output_assertions(
+    pdf_files: list[Path],
+    output_path: Path,
+    input_path: Path,
+) -> dict[str, list[str]]:
+    """Collect post-run output assertions grouped by category."""
+    grouped_issues = {
+        "output bundle issues": validate_pipeline_outputs(pdf_files, output_path),
+        "frontmatter issues": validate_frontmatter(output_path),
+        "orphaned output directories": validate_orphan_output_dirs(output_path, input_path),
+    }
+    return {
+        category: issues
+        for category, issues in grouped_issues.items()
+        if issues
+    }

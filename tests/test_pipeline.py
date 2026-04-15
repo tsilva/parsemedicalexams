@@ -2,6 +2,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import parsemedicalexams.pipeline as pipeline
@@ -97,6 +99,20 @@ def test_match_requested_document_matches_case_insensitive_stem(tmp_path):
     assert matches == [pdf_path]
 
 
+def test_discover_pdf_files_raises_for_unreadable_input_dir(tmp_path, monkeypatch):
+    original_iterdir = Path.iterdir
+
+    def guarded_iterdir(self):
+        if self == tmp_path:
+            raise PermissionError("permission denied")
+        return original_iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", guarded_iterdir)
+
+    with pytest.raises(PermissionError, match="Input path is not readable"):
+        pipeline.discover_pdf_files(tmp_path, r".*\.pdf")
+
+
 def test_select_documents_to_process_skips_complete_outputs(tmp_path, monkeypatch):
     processed = tmp_path / "done.pdf"
     pending = tmp_path / "todo.pdf"
@@ -143,6 +159,17 @@ def test_run_profile_dry_run_uses_process_loop(tmp_path, monkeypatch):
     assert len(calls) == 1
 
 
+def test_run_profile_returns_false_for_unreadable_input_dir(tmp_path, monkeypatch):
+    patch_profile_loading(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        pipeline,
+        "discover_pdf_files",
+        lambda *args, **kwargs: (_ for _ in ()).throw(PermissionError("Input path is not readable")),
+    )
+
+    assert pipeline.run_profile("test", make_args()) is False
+
+
 def test_run_profile_audit_uses_output_validation(tmp_path, monkeypatch):
     config = patch_profile_loading(monkeypatch, tmp_path)
     pdf_path = config.input_path / "exam.pdf"
@@ -152,8 +179,11 @@ def test_run_profile_audit_uses_output_validation(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "discover_pdf_files", lambda *args, **kwargs: [pdf_path])
     monkeypatch.setattr(
         pipeline,
-        "validate_pipeline_outputs",
-        lambda pdf_files, output_path: audit_calls.append((pdf_files, output_path)) or [],
+        "log_output_assertions_report",
+        lambda pdf_files, output_path, input_path, label="": audit_calls.append(
+            (pdf_files, output_path, input_path, label)
+        )
+        or True,
     )
     monkeypatch.setattr(
         pipeline,
@@ -162,11 +192,11 @@ def test_run_profile_audit_uses_output_validation(tmp_path, monkeypatch):
     )
 
     assert pipeline.run_profile("test", make_args(audit_outputs=True)) is True
-    assert audit_calls == [([pdf_path], config.output_path)]
+    assert audit_calls == [([pdf_path], config.output_path, config.input_path, "Output audit")]
 
 
 def test_run_profile_regenerate_uses_summary_regeneration(tmp_path, monkeypatch):
-    patch_profile_loading(monkeypatch, tmp_path)
+    config = patch_profile_loading(monkeypatch, tmp_path)
     calls = []
 
     monkeypatch.setattr(
@@ -177,7 +207,18 @@ def test_run_profile_regenerate_uses_summary_regeneration(tmp_path, monkeypatch)
         )
         or 3,
     )
-    monkeypatch.setattr(pipeline, "validate_frontmatter", lambda output_path: [])
+    pdf_path = config.input_path / "exam.pdf"
+    pdf_path.write_bytes(b"pdf")
+    monkeypatch.setattr(
+        pipeline,
+        "discover_pdf_files",
+        lambda *args, **kwargs: [pdf_path],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "log_output_assertions_report",
+        lambda *args, **kwargs: True,
+    )
 
     assert pipeline.run_profile("test", make_args(regenerate=True)) is True
     assert len(calls) == 1
@@ -201,11 +242,64 @@ def test_run_profile_normal_processes_and_validates_outputs(tmp_path, monkeypatc
         "process_single_pdf",
         lambda pdf_path, *args, **kwargs: processed.append(pdf_path) or 1,
     )
-    monkeypatch.setattr(pipeline, "validate_pipeline_outputs", lambda *args, **kwargs: [])
-    monkeypatch.setattr(pipeline, "validate_frontmatter", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        pipeline,
+        "log_output_assertions_report",
+        lambda *args, **kwargs: True,
+    )
 
     assert pipeline.run_profile("test", make_args()) is True
     assert processed == [pdf_path]
+
+
+def test_process_single_pdf_skips_non_exam_without_reason_attribute(tmp_path, monkeypatch):
+    pdf_path = tmp_path / "invoice.pdf"
+    pdf_path.write_bytes(b"pdf")
+    output_path = tmp_path / "out"
+    output_path.mkdir()
+    config = make_runtime_config(tmp_path)
+    config.output_path = output_path
+
+    image_path = tmp_path / "invoice.001.jpg"
+    image_path.write_bytes(b"jpg")
+    skip_calls = []
+
+    class ClassificationWithoutReason:
+        is_exam = False
+
+    monkeypatch.setattr(
+        pipeline,
+        "preprocess_pdf_images_to_temp",
+        lambda *args, **kwargs: (SimpleNamespace(cleanup=lambda: None), [image_path]),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "classify_document",
+        lambda *args, **kwargs: ClassificationWithoutReason(),
+    )
+    monkeypatch.setattr(pipeline, "purge_derived_outputs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(pipeline, "copy_source_pdf", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        pipeline,
+        "write_skip_marker",
+        lambda doc_output_dir, pdf_name, reason: skip_calls.append((doc_output_dir, pdf_name, reason)),
+    )
+
+    result = pipeline.process_single_pdf(
+        pdf_path,
+        output_path,
+        config,
+        client=object(),
+    )
+
+    assert result == "skipped"
+    assert skip_calls == [
+        (
+            output_path / "invoice",
+            "invoice.pdf",
+            "classified as non-medical document",
+        )
+    ]
 
 
 def test_run_profile_validates_all_discovered_documents_including_skipped(
@@ -235,10 +329,37 @@ def test_run_profile_validates_all_discovered_documents_including_skipped(
     )
     monkeypatch.setattr(
         pipeline,
-        "validate_pipeline_outputs",
-        lambda pdf_files, output_path: audit_calls.append((pdf_files, output_path)) or [],
+        "log_output_assertions_report",
+        lambda pdf_files, output_path, input_path, label="": audit_calls.append(
+            (pdf_files, output_path, input_path, label)
+        )
+        or True,
     )
-    monkeypatch.setattr(pipeline, "validate_frontmatter", lambda *args, **kwargs: [])
 
     assert pipeline.run_profile("test", make_args()) is True
-    assert audit_calls == [([processed_pdf, skipped_pdf], config.output_path)]
+    assert audit_calls == [
+        ([processed_pdf, skipped_pdf], config.output_path, config.input_path, "Post-extraction validation")
+    ]
+
+
+def test_run_profile_returns_false_when_post_extraction_validation_fails(
+    tmp_path, monkeypatch
+):
+    config = patch_profile_loading(monkeypatch, tmp_path)
+    pdf_path = config.input_path / "exam.pdf"
+    pdf_path.write_bytes(b"pdf")
+
+    monkeypatch.setattr(pipeline, "discover_pdf_files", lambda *args, **kwargs: [pdf_path])
+    monkeypatch.setattr(
+        pipeline,
+        "select_documents_to_process",
+        lambda *args, **kwargs: ([pdf_path], 0),
+    )
+    monkeypatch.setattr(pipeline, "process_single_pdf", lambda *args, **kwargs: 1)
+    monkeypatch.setattr(
+        pipeline,
+        "log_output_assertions_report",
+        lambda *args, **kwargs: False,
+    )
+
+    assert pipeline.run_profile("test", make_args()) is False

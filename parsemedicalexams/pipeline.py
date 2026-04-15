@@ -18,6 +18,7 @@ from tqdm import tqdm
 
 from .config import ExtractionConfig, ProfileConfig
 from .document_io import (
+    collect_output_assertions,
     copy_source_pdf,
     convert_pdf_to_images,
     extract_pdf_page_text,
@@ -29,8 +30,6 @@ from .document_io import (
     remove_skip_marker,
     save_document_summary,
     save_transcription_file,
-    validate_frontmatter,
-    validate_pipeline_outputs,
     write_skip_marker,
 )
 from .extraction import (
@@ -117,6 +116,14 @@ def discover_pdf_files(
         direct_matches = [candidate for candidate in direct_candidates if candidate.exists()]
         if direct_matches:
             return direct_matches
+
+    try:
+        next(input_path.iterdir(), None)
+    except PermissionError as exc:
+        raise PermissionError(
+            f"Input path is not readable: {input_path}. "
+            "Grant the running app read access to that Google Drive folder and try again."
+        ) from exc
 
     return sorted(
         [
@@ -500,7 +507,8 @@ def process_single_pdf(
                 write_skip_marker(
                     doc_output_dir,
                     pdf_path.name,
-                    classification.reason or "classified as non-medical document",
+                    getattr(classification, "reason", None)
+                    or "classified as non-medical document",
                 )
                 logger.info("Skipped (not a medical exam): %s", pdf_path.name)
                 return "skipped"
@@ -817,6 +825,27 @@ def process_single_pdf(
     return len(all_exams)
 
 
+def log_output_assertions_report(
+    pdf_files: list[Path],
+    output_path: Path,
+    input_path: Path,
+    label: str = "Post-run validation",
+) -> bool:
+    """Log grouped post-run assertions and return whether validation passed."""
+    grouped_issues = collect_output_assertions(pdf_files, output_path, input_path)
+    if not grouped_issues:
+        logger.info("%s passed with no issues", label)
+        return True
+
+    total_issues = sum(len(items) for items in grouped_issues.values())
+    logger.error("%s found %s issue(s):", label, total_issues)
+    for category, issues in grouped_issues.items():
+        logger.error("%s (%s):", category.capitalize(), len(issues))
+        for issue in issues:
+            logger.error("  %s", issue)
+    return False
+
+
 def run_profile(profile_name: str, args: Namespace) -> bool:
     """Run the pipeline for a single profile."""
     profile_path = ProfileConfig.find_profile(profile_name)
@@ -892,21 +921,31 @@ def run_profile(profile_name: str, args: Namespace) -> bool:
             doc_filter=doc_filter,
         )
         logger.info("%s complete: %s exams", mode_label, total_exams)
-        if mode == RunMode.REGENERATE:
-            frontmatter_issues = validate_frontmatter(config.output_path)
-            if frontmatter_issues:
-                logger.warning("Frontmatter issues (%s):", len(frontmatter_issues))
-                for issue in frontmatter_issues:
-                    logger.warning("  %s", issue)
-            else:
-                logger.info("All frontmatter validated successfully")
-        return True
+        try:
+            validation_pdfs = discover_pdf_files(
+                config.input_path,
+                config.input_file_regex,
+                document=doc_filter,
+            )
+        except PermissionError as exc:
+            logger.error(str(exc))
+            return False
+        return log_output_assertions_report(
+            validation_pdfs,
+            config.output_path,
+            config.input_path,
+            label=f"{mode_label} validation",
+        )
 
-    pdf_files = discover_pdf_files(
-        config.input_path,
-        config.input_file_regex,
-        document=args.document,
-    )
+    try:
+        pdf_files = discover_pdf_files(
+            config.input_path,
+            config.input_file_regex,
+            document=args.document,
+        )
+    except PermissionError as exc:
+        logger.error(str(exc))
+        return False
     logger.info("Found %s PDF files matching pattern", len(pdf_files))
 
     if not pdf_files:
@@ -924,14 +963,12 @@ def run_profile(profile_name: str, args: Namespace) -> bool:
             logger.error(str(exc))
             return False
 
-        issues = validate_pipeline_outputs(target_pdfs, config.output_path)
-        if issues:
-            logger.error("Output audit failed:")
-            for issue in issues:
-                logger.error("  %s", issue)
-            return False
-        logger.info("Output audit passed with no blocking issues")
-        return True
+        return log_output_assertions_report(
+            target_pdfs,
+            config.output_path,
+            config.input_path,
+            label="Output audit",
+        )
 
     try:
         to_process, already_processed = select_documents_to_process(
@@ -1023,20 +1060,9 @@ def run_profile(profile_name: str, args: Namespace) -> bool:
         for doc_name in skipped_documents:
             logger.info("  - %s", doc_name)
 
-    missing_outputs = validate_pipeline_outputs(pdf_files, config.output_path)
-    if missing_outputs:
-        logger.warning("Missing outputs (%s):", len(missing_outputs))
-        for item in missing_outputs:
-            logger.warning("  %s", item)
-    else:
-        logger.info("All outputs validated successfully")
-
-    frontmatter_issues = validate_frontmatter(config.output_path)
-    if frontmatter_issues:
-        logger.warning("Frontmatter issues (%s):", len(frontmatter_issues))
-        for issue in frontmatter_issues:
-            logger.warning("  %s", issue)
-    else:
-        logger.info("All frontmatter validated successfully")
-
-    return True
+    return log_output_assertions_report(
+        pdf_files,
+        config.output_path,
+        config.input_path,
+        label="Post-extraction validation",
+    )

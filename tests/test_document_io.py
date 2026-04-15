@@ -7,13 +7,16 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from parsemedicalexams.document_io import (
+    collect_output_assertions,
     extract_doc_date_prefix,
     frontmatter_to_exam,
     get_document_output_issue,
+    pdf_copy_is_current,
     parse_frontmatter,
     regenerate_summaries,
     save_transcription_file,
     validate_frontmatter,
+    validate_orphan_output_dirs,
     write_markdown_with_frontmatter,
 )
 
@@ -98,6 +101,25 @@ def test_get_document_output_issue_ignores_metadata_only_pdf_changes(tmp_path):
     )
 
     assert get_document_output_issue(source_pdf, output_path) is None
+
+
+def test_pdf_copy_is_current_accepts_sub_microsecond_mtime_drift(
+    tmp_path, monkeypatch
+):
+    source_pdf = tmp_path / "exam.pdf"
+    copied_pdf = tmp_path / "copied.pdf"
+    source_pdf.write_bytes(b"same-source")
+    copied_pdf.write_bytes(b"same-source")
+
+    source_stat = source_pdf.stat()
+    os.utime(copied_pdf, ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns + 100))
+
+    monkeypatch.setattr(
+        "parsemedicalexams.document_io._files_have_same_content",
+        lambda *_: (_ for _ in ()).throw(AssertionError("hash fallback should not run")),
+    )
+
+    assert pdf_copy_is_current(source_pdf, copied_pdf) is True
 
 
 def test_get_document_output_issue_accepts_legacy_transcription_without_prompt_variant(
@@ -214,6 +236,40 @@ def test_get_document_output_issue_detects_page_image_count_mismatch(
         get_document_output_issue(source_pdf, output_path)
         == "page image count mismatch (1 images, 2 PDF pages)"
     )
+
+
+def test_validate_orphan_output_dirs_detects_output_without_source_pdf(tmp_path):
+    input_path = tmp_path / "input"
+    output_path = tmp_path / "out"
+    input_path.mkdir()
+    output_path.mkdir()
+
+    (input_path / "exam.pdf").write_bytes(b"pdf")
+    (output_path / "exam").mkdir()
+    (output_path / "orphan").mkdir()
+    (output_path / "logs").mkdir()
+
+    issues = validate_orphan_output_dirs(output_path, input_path)
+
+    assert issues == ["orphan: output directory has no matching source PDF"]
+
+
+def test_collect_output_assertions_groups_all_post_run_issues(tmp_path):
+    input_path = tmp_path / "input"
+    output_path = tmp_path / "out"
+    input_path.mkdir()
+    output_path.mkdir()
+
+    source_pdf = input_path / "exam.pdf"
+    source_pdf.write_bytes(b"pdf")
+    (output_path / "orphan").mkdir()
+
+    grouped = collect_output_assertions([source_pdf], output_path, input_path)
+
+    assert grouped["output bundle issues"] == ["exam: missing output folder"]
+    assert grouped["orphaned output directories"] == [
+        "orphan: output directory has no matching source PDF"
+    ]
 
 
 def test_validate_frontmatter_detects_exam_date_mismatch_doc_prefix(tmp_path):

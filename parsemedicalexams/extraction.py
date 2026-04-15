@@ -53,6 +53,10 @@ class DocumentClassification(BaseModel):
         default=None,
         description="Department or service within the facility (e.g., 'Radiologia', 'Cardiologia')",
     )
+    reason: Optional[str] = Field(
+        default=None,
+        description="Short explanation for the classification decision, especially when is_exam is false",
+    )
 
 
 CLASSIFICATION_TOOLS = [
