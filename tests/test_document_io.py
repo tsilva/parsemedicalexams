@@ -1,49 +1,47 @@
-import sys
 import os
 import shutil
-from pathlib import Path
 from types import SimpleNamespace
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from parsemedicalexams.document_io import (
     collect_output_assertions,
     extract_doc_date_prefix,
     frontmatter_to_exam,
     get_document_output_issue,
-    pdf_copy_is_current,
     parse_frontmatter,
+    pdf_copy_is_current,
     regenerate_summaries,
     save_transcription_file,
     validate_frontmatter,
     validate_orphan_output_dirs,
     write_markdown_with_frontmatter,
 )
+from parsemedicalexams.models import ExamRecord
 
 
 def make_exam(**overrides):
-    exam = {
-        "exam_date": "2024-01-15",
-        "exam_name_raw": "RX TORAX PA Y LAT",
-        "exam_name_standardized": "Chest X-Ray PA and Lateral",
-        "exam_type": "imaging",
-        "physician_name": "Dr. Smith",
-        "facility_name": "Hospital Central",
-        "department": "Radiology",
-        "page_number": 1,
-        "source_file": "exam.pdf",
-        "prompt_variant": "transcription_system",
-        "page_kind": "chart",
-        "validation_status": "ok",
-        "failure_type": None,
-        "source_mode": "hybrid",
-        "chart_type": "audiogram",
-        "chart_data_status": "ok",
-        "transcription_confidence": 0.95,
-        "retry_attempts": 2,
-        "transcription": "Structured exam transcription body.",
-    }
-    exam.update(overrides)
+    exam = ExamRecord(
+        exam_date="2024-01-15",
+        exam_name_raw="RX TORAX PA Y LAT",
+        exam_name_standardized="Chest X-Ray PA and Lateral",
+        exam_type="imaging",
+        physician_name="Dr. Smith",
+        facility_name="Hospital Central",
+        department="Radiology",
+        page_number=1,
+        source_file="exam.pdf",
+        prompt_variant="transcription_system",
+        page_kind="chart",
+        validation_status="ok",
+        failure_type=None,
+        source_mode="hybrid",
+        chart_type="audiogram",
+        chart_data_status="ok",
+        transcription_confidence=0.95,
+        retry_attempts=2,
+        transcription="Structured exam transcription body.",
+    )
+    for key, value in overrides.items():
+        setattr(exam, key, value)
     return exam
 
 
@@ -58,13 +56,13 @@ def test_frontmatter_round_trip_preserves_extended_fields(tmp_path):
     frontmatter, transcription = parse_frontmatter(content)
     rebuilt = frontmatter_to_exam(frontmatter, transcription, 1, "exam.pdf")
 
-    assert rebuilt["transcription"] == exam["transcription"]
-    assert rebuilt["page_kind"] == "chart"
-    assert rebuilt["validation_status"] == "ok"
-    assert rebuilt["source_mode"] == "hybrid"
-    assert rebuilt["chart_type"] == "audiogram"
-    assert rebuilt["chart_data_status"] == "ok"
-    assert rebuilt["transcription_confidence"] == 0.95
+    assert rebuilt.transcription == exam.transcription
+    assert rebuilt.page_kind == "chart"
+    assert rebuilt.validation_status == "ok"
+    assert rebuilt.source_mode == "hybrid"
+    assert rebuilt.chart_type == "audiogram"
+    assert rebuilt.chart_data_status == "ok"
+    assert rebuilt.transcription_confidence == 0.95
 
 
 def test_get_document_output_issue_detects_changed_source_pdf(tmp_path):
@@ -103,9 +101,7 @@ def test_get_document_output_issue_ignores_metadata_only_pdf_changes(tmp_path):
     assert get_document_output_issue(source_pdf, output_path) is None
 
 
-def test_pdf_copy_is_current_accepts_sub_microsecond_mtime_drift(
-    tmp_path, monkeypatch
-):
+def test_pdf_copy_is_current_accepts_sub_microsecond_mtime_drift(tmp_path, monkeypatch):
     source_pdf = tmp_path / "exam.pdf"
     copied_pdf = tmp_path / "copied.pdf"
     source_pdf.write_bytes(b"same-source")
@@ -122,7 +118,7 @@ def test_pdf_copy_is_current_accepts_sub_microsecond_mtime_drift(
     assert pdf_copy_is_current(source_pdf, copied_pdf) is True
 
 
-def test_get_document_output_issue_accepts_legacy_transcription_without_prompt_variant(
+def test_get_document_output_issue_rejects_transcription_without_prompt_variant(
     tmp_path, monkeypatch
 ):
     source_pdf = tmp_path / "exam.pdf"
@@ -147,11 +143,22 @@ def test_get_document_output_issue_accepts_legacy_transcription_without_prompt_v
         "Legacy transcription body long enough to pass content checks.\n",
     )
     (doc_dir / "exam.summary.md").write_text(
-        "---\nexam_date: '2024-01-15'\nexam_name_raw: Summary\ntitle: Summary\ncategory: other\n---\n\nLegacy summary body long enough to satisfy summary validation.\n",
+        (
+            "---\n"
+            "exam_date: '2024-01-15'\n"
+            "exam_name_raw: Summary\n"
+            "title: Summary\n"
+            "category: other\n"
+            "---\n\n"
+            "Legacy summary body long enough to satisfy summary validation.\n"
+        ),
         encoding="utf-8",
     )
 
-    assert get_document_output_issue(source_pdf, output_path) is None
+    assert (
+        get_document_output_issue(source_pdf, output_path)
+        == "invalid transcription output in exam.001.md: missing_prompt_variant"
+    )
 
 
 def test_extract_doc_date_prefix_reads_prefix():
@@ -159,9 +166,7 @@ def test_extract_doc_date_prefix_reads_prefix():
     assert extract_doc_date_prefix("questionario noite") is None
 
 
-def test_get_document_output_issue_detects_exam_date_mismatch_doc_prefix(
-    tmp_path, monkeypatch
-):
+def test_get_document_output_issue_detects_exam_date_mismatch_doc_prefix(tmp_path, monkeypatch):
     source_pdf = tmp_path / "2025-08-22 - exam.pdf"
     source_pdf.write_bytes(b"source")
     monkeypatch.setattr("parsemedicalexams.document_io.count_pdf_pages", lambda _: 1)
@@ -181,13 +186,21 @@ def test_get_document_output_issue_detects_exam_date_mismatch_doc_prefix(
     )
     save_transcription_file([exam], doc_dir, source_pdf.stem, 1)
     (doc_dir / f"{source_pdf.stem}.summary.md").write_text(
-        "---\nexam_date: '2025-08-22'\ncategory: other\ntitle: Summary\n---\n\nLong enough summary body.\n",
+        (
+            "---\n"
+            "exam_date: '2025-08-22'\n"
+            "category: other\n"
+            "title: Summary\n"
+            "---\n\n"
+            "Long enough summary body.\n"
+        ),
         encoding="utf-8",
     )
 
     assert (
         get_document_output_issue(source_pdf, output_path)
-        == f"invalid transcription output in {source_pdf.stem}.001.md: exam_date_mismatch_doc_prefix"
+        == "invalid transcription output in "
+        f"{source_pdf.stem}.001.md: exam_date_mismatch_doc_prefix"
     )
 
 
@@ -207,9 +220,7 @@ def test_get_document_output_issue_accepts_skip_marker(tmp_path):
     assert get_document_output_issue(source_pdf, output_path) is None
 
 
-def test_get_document_output_issue_detects_page_image_count_mismatch(
-    tmp_path, monkeypatch
-):
+def test_get_document_output_issue_detects_page_image_count_mismatch(tmp_path, monkeypatch):
     source_pdf = tmp_path / "exam.pdf"
     source_pdf.write_bytes(b"source")
     monkeypatch.setattr("parsemedicalexams.document_io.count_pdf_pages", lambda _: 2)
@@ -228,7 +239,15 @@ def test_get_document_output_issue_detects_page_image_count_mismatch(
     )
     save_transcription_file([exam], doc_dir, source_pdf.stem, 1)
     (doc_dir / "exam.summary.md").write_text(
-        "---\nexam_date: '2024-01-15'\nexam_name_raw: Summary\ntitle: Summary\ncategory: other\n---\n\nLong enough summary body.\n",
+        (
+            "---\n"
+            "exam_date: '2024-01-15'\n"
+            "exam_name_raw: Summary\n"
+            "title: Summary\n"
+            "category: other\n"
+            "---\n\n"
+            "Long enough summary body.\n"
+        ),
         encoding="utf-8",
     )
 
@@ -377,10 +396,7 @@ def test_validate_frontmatter_rejects_page_only_fields_on_summary(tmp_path):
 
     issues = validate_frontmatter(output_path)
 
-    assert (
-        f"summary_has_page_fields=['page', 'source']: {doc_stem}.summary.md"
-        in issues
-    )
+    assert f"summary_has_page_fields=['page', 'source']: {doc_stem}.summary.md" in issues
 
 
 def test_regenerate_summaries_reads_markdown_and_writes_summary(tmp_path, monkeypatch):

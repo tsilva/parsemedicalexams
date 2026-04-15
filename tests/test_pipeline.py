@@ -1,10 +1,7 @@
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import parsemedicalexams.pipeline as pipeline
 from parsemedicalexams.config import ExtractionConfig
@@ -21,7 +18,6 @@ def make_args(**overrides):
         model=None,
         workers=None,
         pattern=None,
-        page=None,
     )
     for key, value in overrides.items():
         setattr(args, key, value)
@@ -164,7 +160,9 @@ def test_run_profile_returns_false_for_unreadable_input_dir(tmp_path, monkeypatc
     monkeypatch.setattr(
         pipeline,
         "discover_pdf_files",
-        lambda *args, **kwargs: (_ for _ in ()).throw(PermissionError("Input path is not readable")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            PermissionError("Input path is not readable")
+        ),
     )
 
     assert pipeline.run_profile("test", make_args()) is False
@@ -180,10 +178,9 @@ def test_run_profile_audit_uses_output_validation(tmp_path, monkeypatch):
     monkeypatch.setattr(
         pipeline,
         "log_output_assertions_report",
-        lambda pdf_files, output_path, input_path, label="": audit_calls.append(
-            (pdf_files, output_path, input_path, label)
-        )
-        or True,
+        lambda pdf_files, output_path, input_path, label="": (
+            audit_calls.append((pdf_files, output_path, input_path, label)) or True
+        ),
     )
     monkeypatch.setattr(
         pipeline,
@@ -202,10 +199,9 @@ def test_run_profile_regenerate_uses_summary_regeneration(tmp_path, monkeypatch)
     monkeypatch.setattr(
         pipeline,
         "regenerate_summaries",
-        lambda output_path, config, client, input_path, doc_filter=None: calls.append(
-            (output_path, doc_filter)
-        )
-        or 3,
+        lambda output_path, config, client, input_path, doc_filter=None: (
+            calls.append((output_path, doc_filter)) or 3
+        ),
     )
     pdf_path = config.input_path / "exam.pdf"
     pdf_path.write_bytes(b"pdf")
@@ -282,7 +278,9 @@ def test_process_single_pdf_skips_non_exam_without_reason_attribute(tmp_path, mo
     monkeypatch.setattr(
         pipeline,
         "write_skip_marker",
-        lambda doc_output_dir, pdf_name, reason: skip_calls.append((doc_output_dir, pdf_name, reason)),
+        lambda doc_output_dir, pdf_name, reason: skip_calls.append(
+            (doc_output_dir, pdf_name, reason)
+        ),
     )
 
     result = pipeline.process_single_pdf(
@@ -302,9 +300,39 @@ def test_process_single_pdf_skips_non_exam_without_reason_attribute(tmp_path, mo
     ]
 
 
-def test_run_profile_validates_all_discovered_documents_including_skipped(
-    tmp_path, monkeypatch
-):
+def test_process_single_pdf_returns_none_when_classification_fails(tmp_path, monkeypatch):
+    pdf_path = tmp_path / "exam.pdf"
+    pdf_path.write_bytes(b"pdf")
+    output_path = tmp_path / "out"
+    output_path.mkdir()
+    config = make_runtime_config(tmp_path)
+    config.output_path = output_path
+
+    image_path = tmp_path / "exam.001.jpg"
+    image_path.write_bytes(b"jpg")
+
+    monkeypatch.setattr(
+        pipeline,
+        "preprocess_pdf_images_to_temp",
+        lambda *args, **kwargs: (SimpleNamespace(cleanup=lambda: None), [image_path]),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "classify_document",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("bad completion")),
+    )
+
+    result = pipeline.process_single_pdf(
+        pdf_path,
+        output_path,
+        config,
+        client=object(),
+    )
+
+    assert result is None
+
+
+def test_run_profile_validates_all_discovered_documents_including_skipped(tmp_path, monkeypatch):
     config = patch_profile_loading(monkeypatch, tmp_path)
     processed_pdf = config.input_path / "exam.pdf"
     skipped_pdf = config.input_path / "skip.pdf"
@@ -330,21 +358,23 @@ def test_run_profile_validates_all_discovered_documents_including_skipped(
     monkeypatch.setattr(
         pipeline,
         "log_output_assertions_report",
-        lambda pdf_files, output_path, input_path, label="": audit_calls.append(
-            (pdf_files, output_path, input_path, label)
-        )
-        or True,
+        lambda pdf_files, output_path, input_path, label="": (
+            audit_calls.append((pdf_files, output_path, input_path, label)) or True
+        ),
     )
 
     assert pipeline.run_profile("test", make_args()) is True
     assert audit_calls == [
-        ([processed_pdf, skipped_pdf], config.output_path, config.input_path, "Post-extraction validation")
+        (
+            [processed_pdf, skipped_pdf],
+            config.output_path,
+            config.input_path,
+            "Post-extraction validation",
+        )
     ]
 
 
-def test_run_profile_returns_false_when_post_extraction_validation_fails(
-    tmp_path, monkeypatch
-):
+def test_run_profile_returns_false_when_post_extraction_validation_fails(tmp_path, monkeypatch):
     config = patch_profile_loading(monkeypatch, tmp_path)
     pdf_path = config.input_path / "exam.pdf"
     pdf_path.write_bytes(b"pdf")

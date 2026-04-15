@@ -1,7 +1,6 @@
 """CLI entrypoint for the medical exams parser."""
 
 import argparse
-import sys
 from pathlib import Path
 
 from .config import (
@@ -34,9 +33,7 @@ Examples:
   medicalexamsparser -p tsilva --dry-run           # Preview what would be processed
         """,
     )
-    parser.add_argument(
-        "--profile", "-p", type=str, help="Profile name (without extension)"
-    )
+    parser.add_argument("--profile", "-p", type=str, help="Profile name (without extension)")
     parser.add_argument(
         "--list-profiles", action="store_true", help="List available profiles and exit"
     )
@@ -60,9 +57,6 @@ Examples:
         "-d",
         type=str,
         help="Process only this document (filename or stem). Forces reprocessing.",
-    )
-    parser.add_argument(
-        "--page", type=int, help="Process only this page number (requires --document)"
     )
     parser.add_argument(
         "--model",
@@ -119,25 +113,15 @@ def main():
             print(f"No profiles found in {config_dir}")
         return
 
-    if args.page:
-        print(
-            "Error: --page is temporarily disabled until safe page-only summary rebuild is implemented"
-        )
-        sys.exit(1)
-
     if args.profile:
         profiles_to_run = [args.profile]
     else:
         profiles_to_run = ProfileConfig.list_profiles()
         if not profiles_to_run:
             print(f"No profiles found in {config_dir}")
-            print(
-                "Create a YAML or JSON profile there, then rerun or use --list-profiles."
-            )
-            sys.exit(1)
-        print(
-            f"Running all {len(profiles_to_run)} profiles: {', '.join(profiles_to_run)}"
-        )
+            print("Create a YAML or JSON profile there, then rerun or use --list-profiles.")
+            raise SystemExit(1)
+        print(f"Running all {len(profiles_to_run)} profiles: {', '.join(profiles_to_run)}")
 
     success_count = 0
     failed_profiles = []
@@ -159,7 +143,7 @@ def main():
         print(f"Successful: {success_count}/{len(profiles_to_run)}")
         if failed_profiles:
             print(f"Failed profiles: {', '.join(failed_profiles)}")
-            sys.exit(1)
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -4,10 +4,10 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any
-from PIL import Image, ImageEnhance
+from typing import cast
 
-# Prompts directory
+from PIL import Image, ImageEnhance  # type: ignore[import-untyped]
+
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 logger = logging.getLogger(__name__)
 
@@ -45,16 +45,7 @@ def strip_markdown_fences(text: str) -> str:
     return text
 
 
-def parse_llm_json_response(text: str, fallback: Any = None) -> Any:
-    """Parse JSON from LLM response, handling markdown fences."""
-    text = strip_markdown_fences(text)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return fallback
-
-
-def extract_completion_text(completion: Any, context: str) -> str:
+def extract_completion_text(completion: object, context: str) -> str:
     """Safely extract stripped text content from a chat completion."""
     if not completion:
         logger.error(f"Missing completion response for {context}")
@@ -82,8 +73,25 @@ def extract_completion_text(completion: Any, context: str) -> str:
     return content.strip()
 
 
+def require_completion_text(completion: object, context: str) -> str:
+    """Return completion text or raise when the response is empty or malformed."""
+    content = extract_completion_text(completion, context)
+    if not content:
+        raise RuntimeError(f"Missing completion text for {context}")
+    return content
+
+
+def parse_json_mapping(text: str, context: str) -> dict[str, object]:
+    """Parse a JSON object from model output."""
+    raw = strip_markdown_fences(text)
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{context} must be a JSON object")
+    return cast(dict[str, object], parsed)
+
+
 def extract_dates_from_text(text: str) -> list[str]:
-    """Extract all dates in YYYY-MM-DD format from text. Handles DD/MM/YYYY, DD-MM-YYYY, and YYYY-MM-DD."""
+    """Extract YYYY-MM-DD dates from ISO, DD/MM/YYYY, and DD-MM-YYYY input."""
     dates = []
     for match in re.finditer(r"\b(\d{4})-(\d{2})-(\d{2})\b", text):
         year, month, day = match.groups()
@@ -108,20 +116,16 @@ def setup_logging(log_dir: Path, clear_logs: bool = False) -> logging.Logger:
             if log_file.exists():
                 log_file.write_text("", encoding="utf-8")
 
-    # Configure root logger so all modules inherit the same level
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
 
-    # Remove existing handlers from root logger
     for handler in list(root_logger.handlers):
         root_logger.removeHandler(handler)
         handler.close()
 
-    # Formatters
     file_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     console_formatter = logging.Formatter("%(levelname)s: %(message)s")
 
-    # File handlers
     info_handler = logging.FileHandler(info_log_path, encoding="utf-8")
     info_handler.setLevel(logging.INFO)
     info_handler.setFormatter(file_formatter)
@@ -130,7 +134,6 @@ def setup_logging(log_dir: Path, clear_logs: bool = False) -> logging.Logger:
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(file_formatter)
 
-    # Console handler
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(console_formatter)
@@ -139,6 +142,4 @@ def setup_logging(log_dir: Path, clear_logs: bool = False) -> logging.Logger:
     root_logger.addHandler(error_handler)
     root_logger.addHandler(console_handler)
 
-    # Return a logger for the calling module
-    logger = logging.getLogger(__name__)
-    return logger
+    return logging.getLogger(__name__)

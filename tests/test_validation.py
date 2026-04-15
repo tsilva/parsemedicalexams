@@ -1,8 +1,3 @@
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 from parsemedicalexams.validation import (
     build_no_readable_text_marker,
     build_non_discrete_chart_marker,
@@ -21,7 +16,8 @@ def test_validate_page_output_detects_hard_failure():
 
 def test_validate_page_output_detects_model_narration():
     issues = validate_page_output(
-        "No readable text is visible on this page. The page consists of multiple medical ultrasound image frames."
+        "No readable text is visible on this page. "
+        "The page consists of multiple medical ultrasound image frames."
     )
 
     assert first_blocking_issue(issues).kind == "model_narration"
@@ -29,7 +25,8 @@ def test_validate_page_output_detects_model_narration():
 
 def test_validate_page_output_detects_alternate_ultrasound_narration():
     issues = validate_page_output(
-        "The page consists of ultrasound/scan images with small white measurement text that is too low-resolution to read accurately."
+        "The page consists of ultrasound/scan images with small white measurement "
+        "text that is too low-resolution to read accurately."
     )
 
     assert first_blocking_issue(issues).kind == "model_narration"
@@ -37,7 +34,8 @@ def test_validate_page_output_detects_alternate_ultrasound_narration():
 
 def test_validate_page_output_detects_no_readable_text_narration():
     issues = validate_page_output(
-        "[illegible]\n\n(There is no clearly readable text on this page image; all visible annotations are too small/blurred to transcribe exactly.)"
+        "[illegible]\n\n(There is no clearly readable text on this page image; "
+        "all visible annotations are too small/blurred to transcribe exactly.)"
     )
 
     assert first_blocking_issue(issues).kind == "model_narration"

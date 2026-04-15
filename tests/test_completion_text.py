@@ -1,8 +1,6 @@
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import pytest
 
 from parsemedicalexams.extraction import (
     score_transcription_confidence,
@@ -81,42 +79,37 @@ def test_validate_transcription_allows_empty_refusal_response(caplog):
     assert "Empty refusal check response" in caplog.text
 
 
-def test_vote_on_best_result_falls_back_on_empty_response():
+def test_vote_on_best_result_raises_on_empty_response():
     client = FakeClient(make_completion(None))
     results = ["first", "second"]
 
-    voted, all_results = vote_on_best_result(results, "fake-model", "transcribe_page", client)
-
-    assert voted == "first"
-    assert all_results == results
+    with pytest.raises(RuntimeError, match="Missing completion text"):
+        vote_on_best_result(results, "fake-model", "transcribe_page", client)
 
 
-def test_score_transcription_confidence_returns_neutral_on_empty_response():
+def test_score_transcription_confidence_raises_on_empty_response():
     client = FakeClient(make_completion(None))
 
-    confidence = score_transcription_confidence(
-        "merged",
-        ["one", "two"],
-        "fake-model",
-        client,
-    )
+    with pytest.raises(RuntimeError, match="Missing completion text"):
+        score_transcription_confidence(
+            "merged",
+            ["one", "two"],
+            "fake-model",
+            client,
+        )
 
-    assert confidence == 0.5
 
-
-def test_standardize_exam_types_uses_defaults_on_empty_response(monkeypatch):
+def test_standardize_exam_types_raises_on_empty_response(monkeypatch):
     client = FakeClient(make_completion(None))
     monkeypatch.setattr("parsemedicalexams.standardization.load_cache", lambda name: {})
     monkeypatch.setattr("parsemedicalexams.standardization.save_cache", lambda name, cache: None)
 
-    result = standardize_exam_types(["Chest X-Ray"], "fake-model", client)
+    with pytest.raises(RuntimeError, match="Missing completion text"):
+        standardize_exam_types(["Chest X-Ray"], "fake-model", client)
 
-    assert result == {"Chest X-Ray": ("other", "Chest X-Ray")}
 
-
-def test_llm_summarize_returns_empty_string_on_empty_response():
+def test_llm_summarize_raises_on_empty_response():
     client = FakeClient(make_completion(None))
 
-    summary = _llm_summarize([{"role": "user", "content": "hello"}], "fake-model", client)
-
-    assert summary == ""
+    with pytest.raises(RuntimeError, match="Missing completion text"):
+        _llm_summarize([{"role": "user", "content": "hello"}], "fake-model", client)

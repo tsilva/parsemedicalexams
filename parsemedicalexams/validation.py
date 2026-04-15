@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable, Optional
+from typing import Iterable
+
+from .models import ValidationMetadata
 
 HARD_FAILURE_PATTERNS = [
     re.compile(r"Request too large\. Try with a smaller file\.", re.IGNORECASE),
@@ -60,7 +62,7 @@ class OutputIssue:
     kind: str
     severity: str
     scope: str
-    page: Optional[int]
+    page: int | None
     reason: str
     snippet: str = ""
 
@@ -75,7 +77,7 @@ def has_meaningful_embedded_text(text: str) -> bool:
     return len(body) >= 200 and len(words) >= 30
 
 
-def detect_chart_type(text: str) -> Optional[str]:
+def detect_chart_type(text: str) -> str | None:
     lower = normalize_body(text).lower()
     if not lower:
         return None
@@ -97,9 +99,7 @@ def detect_chart_type(text: str) -> Optional[str]:
         and "dapa" in lower
     ):
         return "tympanometry"
-    if "audiograma vocal" in lower or (
-        "ouvido direito" in lower and "ouvido esquerdo" in lower
-    ):
+    if "audiograma vocal" in lower or ("ouvido direito" in lower and "ouvido esquerdo" in lower):
         return "audiogram"
     return None
 
@@ -107,14 +107,13 @@ def detect_chart_type(text: str) -> Optional[str]:
 def determine_page_strategy(
     embedded_text: str,
     document_exam_name: str = "",
-) -> tuple[str, Optional[str], str]:
+) -> tuple[str, str | None, str]:
     chart_type = detect_chart_type(embedded_text)
     if chart_type:
         return ("chart", chart_type, "hybrid")
     exam_name = normalize_body(document_exam_name).lower()
     if not normalize_body(embedded_text) and (
-        "electroencefalografia" in exam_name
-        or re.search(r"\be\.?e\.?g\b", exam_name)
+        "electroencefalografia" in exam_name or re.search(r"\be\.?e\.?g\b", exam_name)
     ):
         return ("chart", "eeg_signal_trace", "hybrid")
     if has_meaningful_embedded_text(embedded_text):
@@ -137,8 +136,8 @@ def build_non_discrete_chart_marker(chart_type: str, visible_labels: Iterable[st
 
 
 def derive_validation_metadata(
-    issues: list[OutputIssue], page_kind: str, chart_type: Optional[str]
-) -> dict[str, Optional[str]]:
+    issues: list[OutputIssue], page_kind: str, chart_type: str | None
+) -> ValidationMetadata:
     blocking = first_blocking_issue(issues)
     if blocking:
         status = "retryable_failure"
@@ -167,7 +166,7 @@ def derive_validation_metadata(
     }
 
 
-def first_blocking_issue(issues: list[OutputIssue]) -> Optional[OutputIssue]:
+def first_blocking_issue(issues: list[OutputIssue]) -> OutputIssue | None:
     return next((issue for issue in issues if issue.severity == "blocking"), None)
 
 
@@ -177,7 +176,7 @@ def _match_issues(
     kind: str,
     severity: str,
     scope: str,
-    page: Optional[int],
+    page: int | None,
     reason: str,
 ) -> list[OutputIssue]:
     issues: list[OutputIssue] = []
@@ -200,8 +199,8 @@ def _match_issues(
 def validate_page_output(
     text: str,
     page_kind: str = "text",
-    chart_type: Optional[str] = None,
-    page: Optional[int] = None,
+    chart_type: str | None = None,
+    page: int | None = None,
 ) -> list[OutputIssue]:
     body = normalize_body(text)
     issues: list[OutputIssue] = []
@@ -290,8 +289,7 @@ def validate_page_output(
     alpha_non_illegible = [word for word in alpha_words if word != "illegible"]
     residual_after_illegible = re.sub(r"\[illegible\]", "", body, flags=re.IGNORECASE)
     if (
-        illegible_tokens >= 1
-        and not re.search(r"[a-zà-ÿ]{4,}", residual_after_illegible.lower())
+        illegible_tokens >= 1 and not re.search(r"[a-zà-ÿ]{4,}", residual_after_illegible.lower())
     ) or (illegible_tokens >= 4 and len(alpha_non_illegible) <= 3):
         issues.append(
             OutputIssue(
@@ -306,9 +304,7 @@ def validate_page_output(
 
     fragment_lines = [line.strip() for line in body.splitlines() if line.strip()]
     short_fragment_lines = sum(
-        1
-        for line in fragment_lines
-        if len(line) <= 80 and not re.search(r"[.!?]", line)
+        1 for line in fragment_lines if len(line) <= 80 and not re.search(r"[.!?]", line)
     )
     if illegible_tokens >= 1 and len(alpha_non_illegible) <= 8 and short_fragment_lines >= 3:
         issues.append(
@@ -317,7 +313,10 @@ def validate_page_output(
                 severity="blocking",
                 scope="page",
                 page=page,
-                reason="Page output only contains low-signal OCR fragments and illegible placeholders",
+                reason=(
+                    "Page output only contains low-signal OCR fragments "
+                    "and illegible placeholders"
+                ),
                 snippet=body[:160],
             )
         )
@@ -337,7 +336,11 @@ def validate_page_output(
             return issues
 
         frequency_hits = sum(1 for token in AUDIOGRAM_FREQUENCY_TOKENS if token in body)
-        if frequency_hits < 6 or "Right ear thresholds" not in body or "Left ear thresholds" not in body:
+        if (
+            frequency_hits < 6
+            or "Right ear thresholds" not in body
+            or "Left ear thresholds" not in body
+        ):
             issues.append(
                 OutputIssue(
                     kind="chart_scaffold_only",

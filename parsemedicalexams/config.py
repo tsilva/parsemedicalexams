@@ -6,12 +6,13 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import TypeVar
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 from dotenv import dotenv_values
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 APP_NAME = "parsemedicalexams"
 DEFAULT_CONFIG_DIR = Path.home() / ".config" / APP_NAME
@@ -95,7 +96,7 @@ def migrate_profiles(*source_dirs: Path) -> list[Path]:
     return moved_files
 
 
-def migrate_env_file(*source_dirs: Path) -> Optional[Path]:
+def migrate_env_file(*source_dirs: Path) -> Path | None:
     """Move a real .env file into the global config directory if needed."""
     env_path = get_env_path()
     if env_path.exists():
@@ -119,19 +120,15 @@ def sync_example_file(source_path: Path, target_path: Path) -> Path:
     return target_path
 
 
-def load_shared_env(config_dir: Optional[Path] = None) -> dict[str, str]:
+def load_shared_env(config_dir: Path | None = None) -> dict[str, str]:
     """Load shared model and credential settings from the config .env file."""
     env_path = (config_dir or get_config_dir()) / ENV_FILENAME
     if not env_path.exists():
         return {}
-    return {
-        key: value
-        for key, value in dotenv_values(env_path).items()
-        if value is not None
-    }
+    return {key: value for key, value in dotenv_values(env_path).items() if value is not None}
 
 
-def _load_profile_data(profile_path: Path) -> dict[str, Any]:
+def _load_profile_data(profile_path: Path) -> dict[str, object]:
     """Load YAML or JSON profile content from disk."""
     if not profile_path.exists():
         raise FileNotFoundError(f"Profile not found: {profile_path}")
@@ -144,10 +141,10 @@ def _load_profile_data(profile_path: Path) -> dict[str, Any]:
 
     if not isinstance(data, dict):
         raise ValueError(f"Profile must contain a mapping: {profile_path}")
-    return data
+    return dict(data)
 
 
-def _first_value(*values: Any) -> Any:
+def _first_value(*values: T | None) -> T | None:
     """Return the first non-empty value."""
     for value in values:
         if value is not None:
@@ -155,12 +152,21 @@ def _first_value(*values: Any) -> Any:
     return None
 
 
-def _parse_positive_int(value: Any, default: int, field_name: str) -> int:
+def _mapping_section(data: dict[str, object], key: str) -> dict[str, object]:
+    value = data.get(key)
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _optional_str(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _parse_positive_int(value: object, default: int, field_name: str) -> int:
     """Parse a positive integer from profile data."""
     if value is None:
         return default
     try:
-        parsed = int(value)
+        parsed = int(str(value))
     except (TypeError, ValueError):
         logger.warning("%s=%r is not valid. Using %s.", field_name, value, default)
         return default
@@ -170,7 +176,7 @@ def _parse_positive_int(value: Any, default: int, field_name: str) -> int:
     return parsed
 
 
-def _resolve_profile_path(profile_path: Path, raw_path: Optional[str]) -> Optional[Path]:
+def _resolve_profile_path(profile_path: Path, raw_path: str | None) -> Path | None:
     """Resolve a path declared inside a profile."""
     if not raw_path:
         return None
@@ -186,28 +192,23 @@ class ProfileConfig:
 
     name: str
     source_path: Path
-    input_path: Optional[Path] = None
-    output_path: Optional[Path] = None
-    input_file_regex: Optional[str] = None
+    input_path: Path | None = None
+    output_path: Path | None = None
+    input_file_regex: str | None = None
 
-    openrouter_api_key: Optional[str] = None
-    openrouter_base_url: Optional[str] = None
-    extract_model_id: Optional[str] = None
-    summarize_model_id: Optional[str] = None
-    self_consistency_model_id: Optional[str] = None
-    validation_model_id: Optional[str] = None
+    openrouter_api_key: str | None = None
+    openrouter_base_url: str | None = None
+    extract_model_id: str | None = None
+    summarize_model_id: str | None = None
+    self_consistency_model_id: str | None = None
+    validation_model_id: str | None = None
     n_extractions: int = DEFAULT_N_EXTRACTIONS
     max_workers: int = DEFAULT_MAX_WORKERS
     summarize_max_input_tokens: int = DEFAULT_SUMMARIZE_MAX_INPUT_TOKENS
 
-    # Convenience aliases
-    model: Optional[str] = None
-    workers: Optional[int] = None
-
-    # Patient context
-    full_name: Optional[str] = None
-    birth_date: Optional[str] = None
-    locale: Optional[str] = None
+    full_name: str | None = None
+    birth_date: str | None = None
+    locale: str | None = None
 
     @classmethod
     def config_dir(cls) -> Path:
@@ -215,9 +216,7 @@ class ProfileConfig:
         return get_config_dir()
 
     @classmethod
-    def find_profile(
-        cls, profile_name: str, profiles_dir: Optional[Path] = None
-    ) -> Optional[Path]:
+    def find_profile(cls, profile_name: str, profiles_dir: Path | None = None) -> Path | None:
         """Return the profile path for the given profile name."""
         search_dir = profiles_dir or cls.config_dir()
         for ext in PROFILE_EXTENSIONS:
@@ -231,74 +230,80 @@ class ProfileConfig:
         """Load profile from YAML or JSON file."""
         data = _load_profile_data(profile_path)
 
-        paths = data.get("paths", {}) if isinstance(data.get("paths"), dict) else {}
-        models = data.get("models", {}) if isinstance(data.get("models"), dict) else {}
-        processing = (
-            data.get("processing", {})
-            if isinstance(data.get("processing"), dict)
-            else {}
-        )
-        patient = data.get("patient", {}) if isinstance(data.get("patient"), dict) else {}
-        openrouter = (
-            data.get("openrouter", {})
-            if isinstance(data.get("openrouter"), dict)
-            else {}
-        )
+        paths = _mapping_section(data, "paths")
+        models = _mapping_section(data, "models")
+        processing = _mapping_section(data, "processing")
+        patient = _mapping_section(data, "patient")
+        openrouter = _mapping_section(data, "openrouter")
 
-        input_path_str = _first_value(paths.get("input_path"), data.get("input_path"))
-        output_path_str = _first_value(paths.get("output_path"), data.get("output_path"))
-        input_file_regex = _first_value(
-            paths.get("input_file_regex"),
-            data.get("input_file_regex"),
+        input_path_str = _optional_str(
+            _first_value(
+                _optional_str(paths.get("input_path")),
+                _optional_str(data.get("input_path")),
+            )
         )
-
-        model = _first_value(models.get("model"), data.get("model"))
-        workers = _first_value(
-            processing.get("workers"),
+        output_path_str = _optional_str(
+            _first_value(
+                _optional_str(paths.get("output_path")),
+                _optional_str(data.get("output_path")),
+            )
+        )
+        input_file_regex = _optional_str(
+            _first_value(
+                _optional_str(paths.get("input_file_regex")),
+                _optional_str(data.get("input_file_regex")),
+            )
+        )
+        max_workers = _first_value(
             processing.get("max_workers"),
-            data.get("workers"),
             data.get("max_workers"),
         )
+        base_url = _optional_str(
+            _first_value(
+                _optional_str(openrouter.get("base_url")),
+                _optional_str(openrouter.get("openrouter_base_url")),
+                _optional_str(data.get("openrouter_base_url")),
+            )
+        )
+        name = _optional_str(data.get("name")) or profile_path.stem
 
         return cls(
-            name=data.get("name", profile_path.stem),
+            name=name,
             source_path=profile_path,
             input_path=_resolve_profile_path(profile_path, input_path_str),
             output_path=_resolve_profile_path(profile_path, output_path_str),
             input_file_regex=input_file_regex,
-            openrouter_api_key=_first_value(
-                openrouter.get("api_key"),
-                openrouter.get("openrouter_api_key"),
-                data.get("openrouter_api_key"),
-            ),
-            openrouter_base_url=resolve_base_url(
+            openrouter_api_key=_optional_str(
                 _first_value(
-                    openrouter.get("base_url"),
-                    openrouter.get("openrouter_base_url"),
-                    data.get("openrouter_base_url"),
+                    _optional_str(openrouter.get("api_key")),
+                    _optional_str(openrouter.get("openrouter_api_key")),
+                    _optional_str(data.get("openrouter_api_key")),
                 )
-            )
-            if _first_value(
-                openrouter.get("base_url"),
-                openrouter.get("openrouter_base_url"),
-                data.get("openrouter_base_url"),
-            )
-            else None,
-            extract_model_id=_first_value(
-                models.get("extract_model_id"),
-                data.get("extract_model_id"),
             ),
-            summarize_model_id=_first_value(
-                models.get("summarize_model_id"),
-                data.get("summarize_model_id"),
+            openrouter_base_url=resolve_base_url(base_url) if base_url else None,
+            extract_model_id=_optional_str(
+                _first_value(
+                    _optional_str(models.get("extract_model_id")),
+                    _optional_str(data.get("extract_model_id")),
+                )
             ),
-            self_consistency_model_id=_first_value(
-                models.get("self_consistency_model_id"),
-                data.get("self_consistency_model_id"),
+            summarize_model_id=_optional_str(
+                _first_value(
+                    _optional_str(models.get("summarize_model_id")),
+                    _optional_str(data.get("summarize_model_id")),
+                )
             ),
-            validation_model_id=_first_value(
-                models.get("validation_model_id"),
-                data.get("validation_model_id"),
+            self_consistency_model_id=_optional_str(
+                _first_value(
+                    _optional_str(models.get("self_consistency_model_id")),
+                    _optional_str(data.get("self_consistency_model_id")),
+                )
+            ),
+            validation_model_id=_optional_str(
+                _first_value(
+                    _optional_str(models.get("validation_model_id")),
+                    _optional_str(data.get("validation_model_id")),
+                )
             ),
             n_extractions=_parse_positive_int(
                 _first_value(
@@ -309,7 +314,7 @@ class ProfileConfig:
                 "n_extractions",
             ),
             max_workers=_parse_positive_int(
-                workers,
+                max_workers,
                 DEFAULT_MAX_WORKERS,
                 "max_workers",
             ),
@@ -321,17 +326,28 @@ class ProfileConfig:
                 DEFAULT_SUMMARIZE_MAX_INPUT_TOKENS,
                 "summarize_max_input_tokens",
             ),
-            model=model,
-            workers=_parse_positive_int(workers, DEFAULT_MAX_WORKERS, "workers")
-            if workers is not None
-            else None,
-            full_name=_first_value(patient.get("full_name"), data.get("full_name")),
-            birth_date=_first_value(patient.get("birth_date"), data.get("birth_date")),
-            locale=_first_value(patient.get("locale"), data.get("locale")),
+            full_name=_optional_str(
+                _first_value(
+                    _optional_str(patient.get("full_name")),
+                    _optional_str(data.get("full_name")),
+                )
+            ),
+            birth_date=_optional_str(
+                _first_value(
+                    _optional_str(patient.get("birth_date")),
+                    _optional_str(data.get("birth_date")),
+                )
+            ),
+            locale=_optional_str(
+                _first_value(
+                    _optional_str(patient.get("locale")),
+                    _optional_str(data.get("locale")),
+                )
+            ),
         )
 
     @classmethod
-    def list_profiles(cls, profiles_dir: Optional[Path] = None) -> list[str]:
+    def list_profiles(cls, profiles_dir: Path | None = None) -> list[str]:
         """List available profile names from the global config directory."""
         search_dir = profiles_dir or cls.config_dir()
         if not search_dir.exists():
@@ -372,21 +388,14 @@ class ExtractionConfig:
             raise ValueError(f"Profile '{profile.name}' has no output_path defined.")
         shared_env = load_shared_env(profile.source_path.parent)
 
-        openrouter_api_key = (
-            profile.openrouter_api_key or shared_env.get("OPENROUTER_API_KEY")
-        )
+        openrouter_api_key = profile.openrouter_api_key or shared_env.get("OPENROUTER_API_KEY")
         if not openrouter_api_key:
             raise ValueError(
                 f"Missing OPENROUTER_API_KEY in {get_env_path()}."
                 f" Copy {get_env_example_path()} to {get_env_path()} and fill it in."
             )
 
-        default_model = (
-            profile.model
-            or shared_env.get("EXTRACT_MODEL_ID")
-            or shared_env.get("MODEL_ID")
-            or DEFAULT_MODEL_ID
-        )
+        default_model = shared_env.get("EXTRACT_MODEL_ID") or DEFAULT_MODEL_ID
 
         return cls(
             input_path=profile.input_path,
@@ -398,14 +407,10 @@ class ExtractionConfig:
                 or default_model
             ),
             extract_model_id=(
-                profile.extract_model_id
-                or shared_env.get("EXTRACT_MODEL_ID")
-                or default_model
+                profile.extract_model_id or shared_env.get("EXTRACT_MODEL_ID") or default_model
             ),
             summarize_model_id=(
-                profile.summarize_model_id
-                or shared_env.get("SUMMARIZE_MODEL_ID")
-                or default_model
+                profile.summarize_model_id or shared_env.get("SUMMARIZE_MODEL_ID") or default_model
             ),
             n_extractions=profile.n_extractions,
             openrouter_api_key=openrouter_api_key,

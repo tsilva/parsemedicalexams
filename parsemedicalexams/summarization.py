@@ -1,9 +1,14 @@
 """Document-level summarization of medical exam transcriptions."""
 
-import logging
-from openai import OpenAI
+from __future__ import annotations
 
-from .utils import load_prompt, extract_completion_text
+import logging
+
+from openai import OpenAI
+from openai.types.chat import ChatCompletionMessageParam
+
+from .models import ExamRecord
+from .utils import load_prompt, require_completion_text
 from .validation import first_blocking_issue, validate_summary_output
 
 logger = logging.getLogger(__name__)
@@ -16,28 +21,36 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
-def _build_exam_list(exams: list[dict]) -> str:
+def _build_exam_list(exams: list[ExamRecord]) -> str:
     """Build a numbered exam list string for prompt context."""
 
-    def row(i, e):
-        name = e.get("exam_name_standardized") or e.get("exam_name_raw", "Unknown")
-        d = e.get("exam_date", "")
-        return f"{i}. {name} [{e.get('exam_type', 'other')}]{f' ({d})' if d else ''}"
+    def row(index: int, exam: ExamRecord) -> str:
+        name = exam.exam_name_standardized or exam.exam_name_raw
+        exam_date = exam.exam_date or ""
+        exam_type = exam.exam_type or "other"
+        suffix = f" ({exam_date})" if exam_date else ""
+        return f"{index}. {name} [{exam_type}]{suffix}"
 
-    return "\n".join(row(i, e) for i, e in enumerate(exams, 1))
+    return "\n".join(row(index, exam) for index, exam in enumerate(exams, 1))
 
 
-def _build_transcriptions(exams: list[dict]) -> str:
+def _build_transcriptions(exams: list[ExamRecord]) -> str:
     """Concatenate exam transcriptions with separators."""
 
-    def row(i, e):
-        name = e.get("exam_name_standardized") or e.get("exam_name_raw", "Unknown")
-        return f"--- EXAM {i}: {name} (Page {e.get('page_number', '?')}) ---\n{e.get('transcription', '').strip()}"
+    def row(index: int, exam: ExamRecord) -> str:
+        name = exam.exam_name_standardized or exam.exam_name_raw
+        return (
+            f"--- EXAM {index}: {name} (Page {exam.page_number}) ---\n{exam.transcription.strip()}"
+        )
 
-    return "\n\n".join(row(i, e) for i, e in enumerate(exams, 1))
+    return "\n\n".join(row(index, exam) for index, exam in enumerate(exams, 1))
 
 
-def _llm_summarize(messages: list[dict], model_id: str, client: OpenAI) -> str:
+def _llm_summarize(
+    messages: list[ChatCompletionMessageParam],
+    model_id: str,
+    client: OpenAI,
+) -> str:
     """Make a single LLM summarization call."""
     completion = client.chat.completions.create(
         model=model_id,
@@ -45,14 +58,11 @@ def _llm_summarize(messages: list[dict], model_id: str, client: OpenAI) -> str:
         temperature=0.1,
         max_tokens=4000,
     )
-    if not completion or not completion.choices:
-        logger.error("Invalid completion response for summarization")
-        return ""
-    return extract_completion_text(completion, "summarization")
+    return require_completion_text(completion, "summarization")
 
 
 def summarize_document(
-    exams: list[dict],
+    exams: list[ExamRecord],
     model_id: str,
     client: OpenAI,
     max_input_tokens: int = DEFAULT_MAX_INPUT_TOKENS,
@@ -63,13 +73,10 @@ def summarize_document(
         return ""
 
     exams_with_content = [
-        e
-        for e in exams
-        if e.get("transcription", "").strip()
-        and (
-            e.get("validation_status") == "ok"
-            or e.get("chart_data_status") == "non_discrete_visual"
-        )
+        exam
+        for exam in exams
+        if exam.transcription.strip()
+        and (exam.validation_status == "ok" or exam.chart_data_status == "non_discrete_visual")
     ]
     if not exams_with_content:
         return ""
@@ -77,7 +84,6 @@ def summarize_document(
     system_prompt = load_prompt("summarization_system")
     user_prompt_template = load_prompt("summarization_user")
 
-    # Calculate fixed overhead (system prompt + template chrome)
     fixed_overhead_tokens = _estimate_tokens(system_prompt) + 200
     content_budget = max_input_tokens - fixed_overhead_tokens
 
@@ -103,11 +109,11 @@ def summarize_document(
             blocking_issue.kind,
         )
 
-    return ""
+    raise RuntimeError("Summary validation failed after all summarization attempts")
 
 
 def _incremental_summarize(
-    exams: list[dict],
+    exams: list[ExamRecord],
     system_prompt: str,
     user_prompt_template: str,
     content_budget: int,
@@ -126,52 +132,45 @@ def _incremental_summarize(
         exam_list = _build_exam_list(chunk)
         transcriptions = _build_transcriptions(chunk)
 
-        try:
-            if chunk_idx == 0:
-                user_prompt = user_prompt_template.format(
-                    exam_count=len(chunk),
-                    exam_list=exam_list,
-                    transcriptions=transcriptions,
-                )
-            else:
-                user_prompt = incremental_template.format(
-                    existing_summary=running_summary,
-                    new_exam_count=len(chunk),
-                    new_exam_list=exam_list,
-                    new_transcriptions=transcriptions,
-                )
-
-            logger.info(
-                f"Summarizing chunk {chunk_idx + 1}/{len(chunks)} ({len(chunk)} exams)"
+        if chunk_idx == 0:
+            user_prompt = user_prompt_template.format(
+                exam_count=len(chunk),
+                exam_list=exam_list,
+                transcriptions=transcriptions,
             )
-            running_summary = _llm_summarize(
-                [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                model_id,
-                client,
+        else:
+            user_prompt = incremental_template.format(
+                existing_summary=running_summary,
+                new_exam_count=len(chunk),
+                new_exam_list=exam_list,
+                new_transcriptions=transcriptions,
             )
 
-            if not running_summary:
-                logger.error(f"Empty summary from chunk {chunk_idx + 1}, aborting")
-                return ""
-
-        except Exception as e:
-            logger.error(f"Error during summarization (chunk {chunk_idx + 1}): {e}")
-            return running_summary
+        logger.info(
+            "Summarizing chunk %s/%s (%s exams)",
+            chunk_idx + 1,
+            len(chunks),
+            len(chunk),
+        )
+        running_summary = _llm_summarize(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            model_id,
+            client,
+        )
 
     return running_summary
 
 
-def _split_into_chunks(exams: list[dict], content_budget: int) -> list[list[dict]]:
+def _split_into_chunks(exams: list[ExamRecord], content_budget: int) -> list[list[ExamRecord]]:
     """Split exams into chunks that each fit within the token budget."""
-    # Reserve space for the running summary in incremental passes
     incremental_overhead = 2000
     chunk_budget = content_budget - incremental_overhead
 
-    chunks = []
-    current_chunk = []
+    chunks: list[list[ExamRecord]] = []
+    current_chunk: list[ExamRecord] = []
     current_tokens = 0
 
     for exam in exams:

@@ -28,6 +28,7 @@ dependencies = [
     "pydantic",
     "pyyaml",
     "tqdm",
+    "typing-extensions",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +37,8 @@ dev = [
     "pytest-cov",
     "ruff",
     "mypy",
+    "types-PyYAML",
+    "types-tqdm",
 ]
 
 [project.scripts]

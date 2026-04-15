@@ -2,18 +2,32 @@
 
 from __future__ import annotations
 
-import logging
 import hashlib
+import logging
 import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import yaml
-from PIL import Image
+import yaml  # type: ignore[import-untyped]
+from PIL import Image  # type: ignore[import-untyped]
 
+from .models import (
+    ALLOWED_CATEGORIES,
+    ALLOWED_CHART_DATA_STATUSES,
+    ALLOWED_CHART_TYPES,
+    ALLOWED_PAGE_KINDS,
+    ALLOWED_SOURCE_MODES,
+    ALLOWED_VALIDATION_STATUSES,
+    ENHANCED_PAGE_FIELDS,
+    PAGE_ONLY_METADATA_FIELDS,
+    REQUIRED_METADATA_FIELDS,
+    ExamFrontmatter,
+    ExamRecord,
+)
 from .summarization import summarize_document
 from .utils import preprocess_page_image
 from .validation import (
@@ -29,57 +43,6 @@ if TYPE_CHECKING:
     from .config import ExtractionConfig
 
 logger = logging.getLogger(__name__)
-
-
-_FRONTMATTER_MAP = {
-    "exam_date": "exam_date",
-    "exam_name_raw": "exam_name_raw",
-    "exam_name_standardized": "title",
-    "exam_type": "category",
-    "physician_name": "doctor",
-    "facility_name": "facility",
-    "department": "department",
-}
-
-REQUIRED_METADATA_FIELDS = {"exam_date", "exam_name_raw", "category", "title"}
-ALLOWED_CATEGORIES = {
-    "appointment",
-    "endoscopy",
-    "imaging",
-    "other",
-    "prescription",
-    "ultrasound",
-}
-ALLOWED_PAGE_KINDS = {"text", "chart", "image_only"}
-ALLOWED_VALIDATION_STATUSES = {"ok", "retryable_failure", "unsupported_visual", "failed"}
-ALLOWED_SOURCE_MODES = {"embedded_text", "vision", "hybrid"}
-ALLOWED_CHART_TYPES = {
-    "audiogram",
-    "eeg_signal_trace",
-    "sleep_summary_graph",
-    "tympanometry",
-}
-ALLOWED_CHART_DATA_STATUSES = {"ok", "non_discrete_visual"}
-PAGE_ONLY_METADATA_FIELDS = {
-    "page",
-    "source",
-    "prompt_variant",
-    "page_kind",
-    "validation_status",
-    "failure_type",
-    "source_mode",
-    "chart_type",
-    "chart_data_status",
-    "retry_attempts",
-}
-ENHANCED_PAGE_FIELDS = {
-    "page_kind",
-    "validation_status",
-    "failure_type",
-    "source_mode",
-    "chart_type",
-    "chart_data_status",
-}
 SKIP_MARKER_FILENAME = ".skip"
 
 
@@ -103,7 +66,7 @@ def _expected_page_number(md_path: Path, doc_stem: str) -> int | None:
 def validate_metadata_frontmatter(
     md_path: Path,
     doc_stem: str,
-    frontmatter: dict,
+    frontmatter: ExamFrontmatter,
 ) -> list[str]:
     """Validate deterministic metadata invariants for a markdown output file."""
     issues: list[str] = []
@@ -275,31 +238,46 @@ def _sha256_digest(path: Path) -> bytes:
 def count_pdf_pages(pdf_path: Path) -> int:
     """Count pages in a PDF, using metadata tools before raster fallback."""
     try:
-        from pdf2image import pdfinfo_from_path
+        from pdf2image import pdfinfo_from_path  # type: ignore[import-not-found]
 
         info = pdfinfo_from_path(str(pdf_path))
         pages = info.get("Pages")
         if isinstance(pages, int) and pages > 0:
             return pages
-    except Exception:
-        pass
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError):
+        logger.debug("Falling back to raster page counting for %s", pdf_path.name)
 
     return len(convert_pdf_to_images(pdf_path))
 
 
-def build_exam_frontmatter(exam: dict, extra_fields: dict | None = None) -> dict:
-    """Build YAML frontmatter dict from an exam dict."""
-    frontmatter = {
-        frontmatter_key: exam[exam_key]
-        for exam_key, frontmatter_key in _FRONTMATTER_MAP.items()
-        if exam.get(exam_key)
-    }
+def build_exam_frontmatter(
+    exam: ExamRecord,
+    extra_fields: ExamFrontmatter | None = None,
+) -> ExamFrontmatter:
+    """Build YAML frontmatter from a serialized exam record."""
+    frontmatter: ExamFrontmatter = {}
+    if exam.exam_date:
+        frontmatter["exam_date"] = exam.exam_date
+    if exam.exam_name_raw:
+        frontmatter["exam_name_raw"] = exam.exam_name_raw
+    if exam.exam_name_standardized:
+        frontmatter["title"] = exam.exam_name_standardized
+    if exam.exam_type:
+        frontmatter["category"] = exam.exam_type
+    if exam.physician_name:
+        frontmatter["doctor"] = exam.physician_name
+    if exam.facility_name:
+        frontmatter["facility"] = exam.facility_name
+    if exam.department:
+        frontmatter["department"] = exam.department
     if extra_fields:
         frontmatter.update(extra_fields)
     return frontmatter
 
 
-def write_markdown_with_frontmatter(path: Path, frontmatter: dict, body: str) -> None:
+def write_markdown_with_frontmatter(
+    path: Path, frontmatter: ExamFrontmatter, body: str
+) -> None:
     """Write a markdown file with YAML frontmatter."""
     with path.open("w", encoding="utf-8") as handle:
         if frontmatter:
@@ -333,9 +311,40 @@ def purge_derived_outputs(
     remove_skip_marker(doc_output_dir)
 
 
-def parse_frontmatter(content: str) -> tuple[dict, str]:
+def _coerce_frontmatter(raw: object) -> ExamFrontmatter:
+    if not isinstance(raw, dict):
+        return {}
+
+    frontmatter: ExamFrontmatter = {}
+    for key in (
+        "exam_date",
+        "exam_name_raw",
+        "title",
+        "category",
+        "doctor",
+        "facility",
+        "department",
+        "page",
+        "source",
+        "prompt_variant",
+        "page_kind",
+        "validation_status",
+        "failure_type",
+        "source_mode",
+        "chart_type",
+        "chart_data_status",
+        "retry_attempts",
+        "confidence",
+    ):
+        value = raw.get(key)
+        if value is not None:
+            frontmatter[key] = value
+    return frontmatter
+
+
+def parse_frontmatter(content: str) -> tuple[ExamFrontmatter, str]:
     """Parse YAML frontmatter from markdown content."""
-    frontmatter = {}
+    frontmatter: ExamFrontmatter = {}
     transcription = content.strip()
 
     if transcription.startswith("---"):
@@ -343,47 +352,52 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
         if end_marker != -1:
             frontmatter_str = transcription[3:end_marker].strip()
             try:
-                frontmatter = yaml.safe_load(frontmatter_str) or {}
+                frontmatter = _coerce_frontmatter(yaml.safe_load(frontmatter_str))
             except yaml.YAMLError:
-                pass
+                frontmatter = {}
             transcription = transcription[end_marker + 3 :].strip()
 
     return frontmatter, transcription
 
 
 def frontmatter_to_exam(
-    frontmatter: dict,
+    frontmatter: ExamFrontmatter,
     transcription: str,
     page_num: int,
     source_file: str | None = None,
-) -> dict:
-    """Convert frontmatter fields to internal exam dict format."""
-    inverse_map = {frontmatter_key: exam_key for exam_key, frontmatter_key in _FRONTMATTER_MAP.items()}
-    result = {
-        exam_key: frontmatter.get(frontmatter_key)
-        for frontmatter_key, exam_key in inverse_map.items()
-    }
-    result["transcription_confidence"] = frontmatter.get("confidence")
-    result["transcription"] = transcription
-    result["page_number"] = frontmatter.get("page") or page_num
-    result["source_file"] = frontmatter.get("source") or source_file
-    result["page_kind"] = frontmatter.get("page_kind") or "text"
-    result["validation_status"] = frontmatter.get("validation_status") or "ok"
-    result["failure_type"] = frontmatter.get("failure_type")
-    result["source_mode"] = frontmatter.get("source_mode") or "vision"
-    result["chart_type"] = frontmatter.get("chart_type")
-    result["chart_data_status"] = frontmatter.get("chart_data_status")
-    return result
+) -> ExamRecord:
+    """Convert frontmatter fields to the shared internal exam record."""
+    page = frontmatter.get("page")
+    source = frontmatter.get("source")
+    confidence = frontmatter.get("confidence")
+    retry_attempts = frontmatter.get("retry_attempts")
+    return ExamRecord(
+        exam_date=frontmatter.get("exam_date"),
+        exam_name_raw=frontmatter.get("exam_name_raw") or "",
+        exam_name_standardized=frontmatter.get("title"),
+        exam_type=frontmatter.get("category"),
+        physician_name=frontmatter.get("doctor"),
+        facility_name=frontmatter.get("facility"),
+        department=frontmatter.get("department"),
+        transcription_confidence=confidence if isinstance(confidence, (int, float)) else None,
+        transcription=transcription,
+        page_number=page if isinstance(page, int) and page > 0 else page_num,
+        source_file=source if isinstance(source, str) else (source_file or ""),
+        prompt_variant=frontmatter.get("prompt_variant"),
+        page_kind=frontmatter.get("page_kind") or "text",
+        validation_status=frontmatter.get("validation_status") or "ok",
+        failure_type=frontmatter.get("failure_type"),
+        source_mode=frontmatter.get("source_mode") or "vision",
+        chart_type=frontmatter.get("chart_type"),
+        chart_data_status=frontmatter.get("chart_data_status"),
+        retry_attempts=retry_attempts if isinstance(retry_attempts, int) else 1,
+    )
 
 
 def _validate_existing_transcription_file(md_path: Path) -> list[str]:
     frontmatter, transcription = parse_frontmatter(md_path.read_text(encoding="utf-8"))
     doc_stem = md_path.name.rsplit(".", 2)[0]
-    problems = [
-        problem
-        for problem in validate_metadata_frontmatter(md_path, doc_stem, frontmatter)
-        if problem != "missing_prompt_variant"
-    ]
+    problems = validate_metadata_frontmatter(md_path, doc_stem, frontmatter)
     inferred_page_kind, inferred_chart_type, _ = determine_page_strategy(
         transcription,
         document_exam_name=frontmatter.get("exam_name_raw", ""),
@@ -482,7 +496,7 @@ def is_document_processed(pdf_path: Path, output_path: Path) -> bool:
 def convert_pdf_to_images(pdf_path: Path) -> list[Image.Image]:
     """Convert a PDF into PIL images, using pdftoppm as a fallback."""
     try:
-        from pdf2image import convert_from_path
+        from pdf2image import convert_from_path  # type: ignore[import-not-found]
 
         return convert_from_path(str(pdf_path))
     except ModuleNotFoundError:
@@ -543,43 +557,48 @@ def extract_pdf_page_text(pdf_path: Path, page_num: int) -> str:
 
 
 def save_transcription_file(
-    exams: list[dict], doc_output_dir: Path, doc_stem: str, page_num: int
+    exams: Sequence[ExamRecord],
+    doc_output_dir: Path,
+    doc_stem: str,
+    page_num: int,
 ) -> None:
     """Save a page transcription as markdown file with YAML frontmatter."""
     md_path = doc_output_dir / f"{doc_stem}.{page_num:03d}.md"
 
-    frontmatter: dict = {}
+    frontmatter: ExamFrontmatter = {}
     if exams:
         exam = exams[0]
-        extra = {
-            key: exam[exam_key]
-            for key, exam_key in [
-                ("page", "page_number"),
-                ("source", "source_file"),
-                ("prompt_variant", "prompt_variant"),
-                ("page_kind", "page_kind"),
-                ("validation_status", "validation_status"),
-                ("failure_type", "failure_type"),
-                ("source_mode", "source_mode"),
-                ("chart_type", "chart_type"),
-                ("chart_data_status", "chart_data_status"),
-            ]
-            if exam.get(exam_key)
-        }
-        if exam.get("transcription_confidence") is not None:
-            extra["confidence"] = exam["transcription_confidence"]
-        if (exam.get("retry_attempts") or 0) > 1:
-            extra["retry_attempts"] = exam["retry_attempts"]
+        extra: ExamFrontmatter = {}
+        extra["page"] = exam.page_number
+        extra["source"] = exam.source_file
+        if exam.prompt_variant is not None:
+            extra["prompt_variant"] = exam.prompt_variant
+        extra["page_kind"] = exam.page_kind
+        extra["validation_status"] = exam.validation_status
+        if exam.failure_type is not None:
+            extra["failure_type"] = exam.failure_type
+        extra["source_mode"] = exam.source_mode
+        if exam.chart_type is not None:
+            extra["chart_type"] = exam.chart_type
+        if exam.chart_data_status is not None:
+            extra["chart_data_status"] = exam.chart_data_status
+        if exam.transcription_confidence is not None:
+            extra["confidence"] = exam.transcription_confidence
+        if exam.retry_attempts > 1:
+            extra["retry_attempts"] = exam.retry_attempts
         frontmatter = build_exam_frontmatter(exam, extra)
 
-    transcriptions = [exam.get("transcription", "") for exam in exams]
+    transcriptions = [exam.transcription for exam in exams]
     write_markdown_with_frontmatter(
         md_path, frontmatter, "\n\n".join(transcriptions).strip() + "\n"
     )
 
 
 def save_document_summary(
-    summary: str, doc_output_dir: Path, doc_stem: str, exams: list[dict] | None = None
+    summary: str,
+    doc_output_dir: Path,
+    doc_stem: str,
+    exams: Sequence[ExamRecord] | None = None,
 ) -> None:
     """Save a document-level summary as markdown file with YAML frontmatter."""
     if not summary:
@@ -637,7 +656,11 @@ def regenerate_summaries(
     doc_filter: str | None = None,
 ) -> int:
     """Regenerate document-level summary files from existing transcription markdown files."""
-    doc_dirs = [doc_dir for doc_dir in output_path.iterdir() if doc_dir.is_dir() and doc_dir.name != "logs"]
+    doc_dirs = [
+        doc_dir
+        for doc_dir in output_path.iterdir()
+        if doc_dir.is_dir() and doc_dir.name != "logs"
+    ]
 
     if doc_filter:
         query = doc_filter.lower()
@@ -678,7 +701,7 @@ def regenerate_summaries(
             logger.warning("No transcription files found in %s", doc_dir)
             continue
 
-        all_exams = []
+        all_exams: list[ExamRecord] = []
         for md_path in md_files:
             parts = md_path.stem.split(".")
             if len(parts) < 2:
@@ -692,7 +715,12 @@ def regenerate_summaries(
                 md_path.read_text(encoding="utf-8")
             )
             all_exams.append(
-                frontmatter_to_exam(frontmatter, transcription, page_num, f"{doc_stem}.pdf")
+                frontmatter_to_exam(
+                    frontmatter,
+                    transcription,
+                    page_num,
+                    f"{doc_stem}.pdf",
+                )
             )
 
         if not all_exams:
@@ -747,13 +775,17 @@ def validate_orphan_output_dirs(output_path: Path, input_path: Path) -> list[str
 def validate_frontmatter(output_path: Path) -> list[str]:
     """Validate that all .md files have YAML frontmatter with required fields."""
     issues = []
-    doc_dirs = [doc_dir for doc_dir in output_path.iterdir() if doc_dir.is_dir() and doc_dir.name != "logs"]
+    doc_dirs = [
+        doc_dir
+        for doc_dir in output_path.iterdir()
+        if doc_dir.is_dir() and doc_dir.name != "logs"
+    ]
     for doc_dir in doc_dirs:
         doc_stem = doc_dir.name
         for md_path in doc_dir.glob(f"{doc_stem}.*.md"):
             try:
                 frontmatter, _ = parse_frontmatter(md_path.read_text(encoding="utf-8"))
-            except Exception as exc:
+            except OSError as exc:
                 issues.append(f"Error reading {md_path.name}: {exc}")
                 continue
 
@@ -766,7 +798,9 @@ def validate_frontmatter(output_path: Path) -> list[str]:
                     exam_date = frontmatter.get("exam_date")
                     expected_doc_date = extract_doc_date_prefix(doc_stem)
                     issues.append(
-                        f"Exam date {exam_date} does not match document date prefix {expected_doc_date}: {md_path.name}"
+                        "Exam date "
+                        f"{exam_date} does not match document date prefix "
+                        f"{expected_doc_date}: {md_path.name}"
                     )
                 else:
                     issues.append(f"{problem}: {md_path.name}")

@@ -7,20 +7,19 @@ import re
 import tempfile
 from argparse import Namespace
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
 
 import httpx
-from openai import OpenAI
-from PIL import Image
-from tqdm import tqdm
+from openai import APIError, OpenAI
+from PIL import Image  # type: ignore[import-untyped]
+from tqdm import tqdm  # type: ignore[import-untyped]
 
 from .config import ExtractionConfig, ProfileConfig
 from .document_io import (
     collect_output_assertions,
-    copy_source_pdf,
     convert_pdf_to_images,
+    copy_source_pdf,
     extract_pdf_page_text,
     get_document_output_issue,
     persist_temp_images,
@@ -33,7 +32,6 @@ from .document_io import (
     write_skip_marker,
 )
 from .extraction import (
-    DocumentClassification,
     build_chart_user_prompt,
     classify_document,
     score_transcription_confidence,
@@ -41,6 +39,7 @@ from .extraction import (
     transcribe_page,
     transcribe_with_retry,
 )
+from .models import ExamRecord
 from .standardization import standardize_exam_types
 from .summarization import summarize_document
 from .utils import extract_dates_from_text, setup_logging
@@ -63,32 +62,6 @@ class RunMode(str, Enum):
     AUDIT = "audit"
     REGENERATE = "regenerate"
     RESUMMARIZE = "resummarize"
-
-
-@dataclass(slots=True)
-class PageExamRecord:
-    exam_name_raw: str
-    exam_date: str | None
-    transcription: str
-    page_number: int
-    source_file: str
-    transcription_confidence: float | None = None
-    prompt_variant: str | None = None
-    retry_attempts: int = 1
-    physician_name: str | None = None
-    department: str | None = None
-    facility_name: str | None = None
-    page_kind: str = "text"
-    validation_status: str = "ok"
-    failure_type: str | None = None
-    source_mode: str = "vision"
-    chart_type: str | None = None
-    chart_data_status: str | None = None
-    exam_type: str | None = None
-    exam_name_standardized: str | None = None
-
-    def to_exam_dict(self) -> dict:
-        return asdict(self)
 
 
 def resolve_run_mode(args: Namespace) -> RunMode:
@@ -197,7 +170,8 @@ def build_profile_context(profile: ProfileConfig) -> str:
     if profile.birth_date:
         parts.append(f"Patient date of birth: {profile.birth_date}")
         parts.append(
-            f"IMPORTANT: {profile.birth_date} is the patient's birth date — NEVER use it as exam_date"
+            "IMPORTANT: "
+            f"{profile.birth_date} is the patient's birth date — NEVER use it as exam_date"
         )
     if profile.locale:
         parts.append(
@@ -367,7 +341,7 @@ def extract_date_from_filename(filename: str) -> str | None:
 
 
 def select_most_frequent_date(
-    exams: list[PageExamRecord],
+    exams: list[ExamRecord],
     exclude_dates: set[str] | None = None,
     filename_date: str | None = None,
 ) -> str | None:
@@ -410,7 +384,8 @@ def select_most_frequent_date(
         and filename_date in date_counts
     ):
         logger.info(
-            "Filename date override: %s (found in %s pages) overrides frequency winner %s (%s pages)",
+            "Filename date override: %s (found in %s pages) overrides "
+            "frequency winner %s (%s pages)",
             filename_date,
             date_counts[filename_date],
             most_common_date,
@@ -426,7 +401,6 @@ def process_single_pdf(
     output_path: Path,
     config: ExtractionConfig,
     client: OpenAI,
-    page_filter: int | None = None,
     profile_context: str = "",
     birth_date: str | None = None,
     force_regenerate_images: bool = False,
@@ -473,53 +447,45 @@ def process_single_pdf(
                 working_pdf_path, doc_stem
             )
 
-        if page_filter is not None:
-            logger.debug(
-                "Skipping classification for page-specific reprocessing: %s",
-                pdf_path.name,
+        logger.debug(
+            "Classifying document: %s (%s pages)",
+            pdf_path.name,
+            len(temp_image_paths),
+        )
+        try:
+            classification = classify_document(
+                temp_image_paths,
+                config.extract_model_id,
+                client,
+                profile_context=profile_context,
             )
-            classification = DocumentClassification(is_exam=True)
-        else:
-            logger.debug(
-                "Classifying document: %s (%s pages)",
-                pdf_path.name,
-                len(temp_image_paths),
-            )
-            try:
-                classification = classify_document(
-                    temp_image_paths,
-                    config.extract_model_id,
-                    client,
-                    profile_context=profile_context,
-                )
-            except Exception as exc:
-                logger.error("Classification failed for %s: %s", pdf_path.name, exc)
-                classification = DocumentClassification(is_exam=True)
+        except (APIError, RuntimeError, ValueError, TypeError) as exc:
+            logger.error("Classification failed for %s: %s", pdf_path.name, exc)
+            return None
 
-            if not classification.is_exam:
-                doc_output_dir.mkdir(parents=True, exist_ok=True)
-                purge_derived_outputs(
-                    doc_output_dir,
-                    doc_stem,
-                    remove_images=True,
-                )
-                copy_source_pdf(pdf_path, doc_output_dir)
-                write_skip_marker(
-                    doc_output_dir,
-                    pdf_path.name,
-                    getattr(classification, "reason", None)
-                    or "classified as non-medical document",
-                )
-                logger.info("Skipped (not a medical exam): %s", pdf_path.name)
-                return "skipped"
-
-        doc_output_dir.mkdir(parents=True, exist_ok=True)
-        if page_filter is None:
+        if not classification.is_exam:
+            doc_output_dir.mkdir(parents=True, exist_ok=True)
             purge_derived_outputs(
                 doc_output_dir,
                 doc_stem,
-                remove_images=force_regenerate_images,
+                remove_images=True,
             )
+            copy_source_pdf(pdf_path, doc_output_dir)
+            write_skip_marker(
+                doc_output_dir,
+                pdf_path.name,
+                getattr(classification, "reason", None)
+                or "classified as non-medical document",
+            )
+            logger.info("Skipped (not a medical exam): %s", pdf_path.name)
+            return "skipped"
+
+        doc_output_dir.mkdir(parents=True, exist_ok=True)
+        purge_derived_outputs(
+            doc_output_dir,
+            doc_stem,
+            remove_images=force_regenerate_images,
+        )
         remove_skip_marker(doc_output_dir)
 
         copy_source_pdf(pdf_path, doc_output_dir)
@@ -529,10 +495,7 @@ def process_single_pdf(
         exam_date = classification.exam_date or extract_date_from_filename(pdf_path.name)
         facility_name = classification.facility_name
 
-        def process_page(page_num: int, image_path: Path) -> PageExamRecord | None:
-            if page_filter is not None and page_num != page_filter:
-                return None
-
+        def process_page(page_num: int, image_path: Path) -> ExamRecord:
             embedded_text = extract_pdf_page_text(working_pdf_path, page_num)
             page_kind, chart_type, source_mode = determine_page_strategy(
                 embedded_text,
@@ -544,26 +507,44 @@ def process_single_pdf(
             transcription = ""
             page_exam_name = exam_name
 
-            try:
-                if chart_type == "sleep_summary_graph":
+            if chart_type == "sleep_summary_graph":
+                transcription = build_non_discrete_chart_marker(
+                    chart_type,
+                    _extract_visible_chart_labels(embedded_text),
+                )
+                prompt_variant_used = "chart_marker"
+            elif chart_type == "eeg_signal_trace":
+                original_text, prompt_variant_used, retry_attempts = transcribe_with_retry(
+                    image_path=image_path,
+                    model_id=config.extract_model_id,
+                    client=client,
+                    validation_model_id=config.validation_model_id,
+                    temperature=0.1,
+                    profile_context=profile_context,
+                    max_retries=1,
+                    page_kind="text",
+                )
+                signal_labels = _extract_visible_signal_labels(
+                    original_text,
+                    document_date=exam_date,
+                )
+                if signal_labels:
                     transcription = build_non_discrete_chart_marker(
                         chart_type,
-                        _extract_visible_chart_labels(embedded_text),
+                        signal_labels,
                     )
-                    prompt_variant_used = "chart_marker"
-                elif chart_type == "eeg_signal_trace":
-                    original_text, prompt_variant_used, retry_attempts = transcribe_with_retry(
+                    prompt_variant_used = "eeg_signal_trace_marker"
+                else:
+                    rotated_text, rotated_variant, rotated_attempts = _transcribe_rotated_image(
                         image_path=image_path,
                         model_id=config.extract_model_id,
                         client=client,
                         validation_model_id=config.validation_model_id,
-                        temperature=0.1,
                         profile_context=profile_context,
-                        max_retries=1,
-                        page_kind="text",
                     )
+                    retry_attempts += rotated_attempts
                     signal_labels = _extract_visible_signal_labels(
-                        original_text,
+                        rotated_text,
                         document_date=exam_date,
                     )
                     if signal_labels:
@@ -571,109 +552,85 @@ def process_single_pdf(
                             chart_type,
                             signal_labels,
                         )
-                        prompt_variant_used = "eeg_signal_trace_marker"
+                        prompt_variant_used = f"{rotated_variant}_rotated_marker"
                     else:
-                        rotated_text, rotated_variant, rotated_attempts = (
-                            _transcribe_rotated_image(
-                                image_path=image_path,
-                                model_id=config.extract_model_id,
-                                client=client,
-                                validation_model_id=config.validation_model_id,
-                                profile_context=profile_context,
-                            )
-                        )
-                        retry_attempts += rotated_attempts
-                        signal_labels = _extract_visible_signal_labels(
-                            rotated_text,
-                            document_date=exam_date,
-                        )
-                        if signal_labels:
-                            transcription = build_non_discrete_chart_marker(
-                                chart_type,
-                                signal_labels,
-                            )
-                            prompt_variant_used = f"{rotated_variant}_rotated_marker"
-                        else:
-                            page_kind = "image_only"
-                            chart_type = None
-                            transcription = build_no_readable_text_marker()
-                            prompt_variant_used = f"{rotated_variant}_rotated_no_text"
-                elif chart_type == "audiogram":
-                    transcription, prompt_variant_used, retry_attempts = transcribe_with_retry(
-                        image_path=image_path,
-                        model_id=config.extract_model_id,
-                        client=client,
-                        validation_model_id=config.validation_model_id,
-                        temperature=0.1,
-                        profile_context=profile_context,
-                        max_retries=1,
-                        page_kind="chart",
-                        chart_type=chart_type,
-                        prompt_variants=[
-                            "chart_transcription_system",
-                            "chart_transcription_system_alt1",
-                        ],
-                        user_prompt_text=build_chart_user_prompt(chart_type, embedded_text),
+                        page_kind = "image_only"
+                        chart_type = None
+                        transcription = build_no_readable_text_marker()
+                        prompt_variant_used = f"{rotated_variant}_rotated_no_text"
+            elif chart_type == "audiogram":
+                transcription, prompt_variant_used, retry_attempts = transcribe_with_retry(
+                    image_path=image_path,
+                    model_id=config.extract_model_id,
+                    client=client,
+                    validation_model_id=config.validation_model_id,
+                    temperature=0.1,
+                    profile_context=profile_context,
+                    max_retries=1,
+                    page_kind="chart",
+                    chart_type=chart_type,
+                    prompt_variants=[
+                        "chart_transcription_system",
+                        "chart_transcription_system_alt1",
+                    ],
+                    user_prompt_text=build_chart_user_prompt(chart_type, embedded_text),
+                )
+                page_exam_name = "Audiograma Vocal"
+            elif chart_type == "tympanometry":
+                transcription, prompt_variant_used, retry_attempts = transcribe_with_retry(
+                    image_path=image_path,
+                    model_id=config.extract_model_id,
+                    client=client,
+                    validation_model_id=config.validation_model_id,
+                    temperature=0.1,
+                    profile_context=profile_context,
+                    max_retries=1,
+                    page_kind="chart",
+                    chart_type=chart_type,
+                    prompt_variants=[
+                        "chart_transcription_system",
+                        "chart_transcription_system_alt1",
+                    ],
+                    user_prompt_text=build_chart_user_prompt(chart_type, embedded_text),
+                )
+                page_exam_name = "Timpanometria"
+            elif source_mode == "embedded_text":
+                transcription = embedded_text
+                prompt_variant_used = "pdftotext_layout"
+            elif config.n_extractions > 1:
+                transcription, all_transcriptions = self_consistency(
+                    transcribe_page,
+                    config.self_consistency_model_id,
+                    config.n_extractions,
+                    image_path,
+                    config.extract_model_id,
+                    client,
+                    client=client,
+                    profile_context=profile_context,
+                )
+                confidence = score_transcription_confidence(
+                    transcription,
+                    all_transcriptions,
+                    config.self_consistency_model_id,
+                    client,
+                )
+                if confidence < 1.0:
+                    logger.info(
+                        "Self-consistency confidence: %.2f for %s",
+                        confidence,
+                        image_path.name,
                     )
-                    page_exam_name = "Audiograma Vocal"
-                elif chart_type == "tympanometry":
-                    transcription, prompt_variant_used, retry_attempts = transcribe_with_retry(
-                        image_path=image_path,
-                        model_id=config.extract_model_id,
-                        client=client,
-                        validation_model_id=config.validation_model_id,
-                        temperature=0.1,
-                        profile_context=profile_context,
-                        max_retries=1,
-                        page_kind="chart",
-                        chart_type=chart_type,
-                        prompt_variants=[
-                            "chart_transcription_system",
-                            "chart_transcription_system_alt1",
-                        ],
-                        user_prompt_text=build_chart_user_prompt(chart_type, embedded_text),
-                    )
-                    page_exam_name = "Timpanometria"
-                elif source_mode == "embedded_text":
-                    transcription = embedded_text
-                    prompt_variant_used = "pdftotext_layout"
-                elif config.n_extractions > 1:
-                    transcription, all_transcriptions = self_consistency(
-                        transcribe_page,
-                        config.self_consistency_model_id,
-                        config.n_extractions,
-                        image_path,
-                        config.extract_model_id,
-                        client,
-                        client=client,
-                        profile_context=profile_context,
-                    )
-                    confidence = score_transcription_confidence(
-                        transcription,
-                        all_transcriptions,
-                        config.self_consistency_model_id,
-                        client,
-                    )
-                    if confidence < 1.0:
-                        logger.info(
-                            "Self-consistency confidence: %.2f for %s",
-                            confidence,
-                            image_path.name,
-                        )
-                else:
-                    transcription, prompt_variant_used, retry_attempts = transcribe_with_retry(
-                        image_path=image_path,
-                        model_id=config.extract_model_id,
-                        client=client,
-                        validation_model_id=config.validation_model_id,
-                        temperature=0.1,
-                        profile_context=profile_context,
-                        max_retries=3,
-                        page_kind="text",
-                    )
-            except Exception as exc:
-                logger.error("Transcription failed for %s: %s", image_path.name, exc)
-                transcription = ""
+            else:
+                transcription, prompt_variant_used, retry_attempts = transcribe_with_retry(
+                    image_path=image_path,
+                    model_id=config.extract_model_id,
+                    client=client,
+                    validation_model_id=config.validation_model_id,
+                    temperature=0.1,
+                    profile_context=profile_context,
+                    max_retries=3,
+                    page_kind="text",
+                )
 
             issues = validate_page_output(
                 transcription,
@@ -708,7 +665,7 @@ def process_single_pdf(
                     prompt_variant_used,
                 )
 
-            return PageExamRecord(
+            return ExamRecord(
                 exam_name_raw=page_exam_name,
                 exam_date=exam_date,
                 transcription=transcription,
@@ -726,7 +683,8 @@ def process_single_pdf(
                 **validation_meta,
             )
 
-        all_exams: list[PageExamRecord] = []
+        all_exams: list[ExamRecord] = []
+        page_errors: list[int] = []
         with ThreadPoolExecutor(max_workers=config.max_workers) as executor:
             futures = {
                 executor.submit(process_page, page_num, image_path): page_num
@@ -736,10 +694,13 @@ def process_single_pdf(
                 page_num = futures[future]
                 try:
                     exam = future.result()
-                    if exam is not None:
-                        all_exams.append(exam)
+                    all_exams.append(exam)
                 except Exception as exc:
                     logger.error("Page %s processing failed: %s", page_num, exc)
+                    page_errors.append(page_num)
+
+        if page_errors:
+            return None
 
         all_exams.sort(key=lambda exam: exam.page_number)
     finally:
@@ -786,7 +747,11 @@ def process_single_pdf(
                 if exam.chart_type not in deterministic_mappings
             }
         )
-        standardized = standardize_exam_types(raw_names, config.extract_model_id, client)
+        try:
+            standardized = standardize_exam_types(raw_names, config.extract_model_id, client)
+        except (APIError, RuntimeError, ValueError, TypeError) as exc:
+            logger.error("Standardization failed for %s: %s", pdf_path.name, exc)
+            return None
 
         for exam in all_exams:
             if exam.chart_type in deterministic_mappings:
@@ -802,24 +767,27 @@ def process_single_pdf(
 
         for exam in all_exams:
             save_transcription_file(
-                [exam.to_exam_dict()],
+                [exam],
                 doc_output_dir,
                 doc_stem,
                 exam.page_number,
             )
 
-        exam_dicts = [exam.to_exam_dict() for exam in all_exams]
-        document_summary = summarize_document(
-            exam_dicts,
-            config.summarize_model_id,
-            client,
-            max_input_tokens=config.summarize_max_input_tokens,
-        )
+        try:
+            document_summary = summarize_document(
+                all_exams,
+                config.summarize_model_id,
+                client,
+                max_input_tokens=config.summarize_max_input_tokens,
+            )
+        except (APIError, RuntimeError, ValueError, TypeError) as exc:
+            logger.error("Summarization failed for %s: %s", pdf_path.name, exc)
+            return None
         summary_issues = validate_summary_output(document_summary) if document_summary else []
         if first_blocking_issue(summary_issues):
             logger.error("Blocking summary validation failure in %s", pdf_path.name)
             return None
-        save_document_summary(document_summary, doc_output_dir, doc_stem, exam_dicts)
+        save_document_summary(document_summary, doc_output_dir, doc_stem, all_exams)
 
     logger.info("Processed %s pages for: %s", len(all_exams), pdf_path.name)
     return len(all_exams)
@@ -982,8 +950,7 @@ def run_profile(profile_name: str, args: Namespace) -> bool:
         return False
 
     if args.document:
-        page_info = f" (page {args.page})" if args.page else ""
-        logger.info("Force reprocessing: %s%s", to_process[0].name, page_info)
+        logger.info("Force reprocessing: %s", to_process[0].name)
     elif args.reprocess_all:
         logger.info("Force reprocessing all %s documents", len(to_process))
     else:
@@ -1005,7 +972,6 @@ def run_profile(profile_name: str, args: Namespace) -> bool:
                 config.output_path,
                 config,
                 client,
-                page_filter=args.page,
                 profile_context=profile_context,
                 birth_date=profile.birth_date,
                 force_regenerate_images=bool(args.document),
