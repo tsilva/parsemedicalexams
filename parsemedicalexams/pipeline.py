@@ -20,6 +20,7 @@ from .document_io import (
     collect_output_assertions,
     convert_pdf_to_images,
     copy_source_pdf,
+    count_pdf_pages,
     extract_pdf_page_text,
     get_document_output_issue,
     persist_temp_images,
@@ -121,6 +122,25 @@ def match_requested_document(pdf_files: list[Path], document: str) -> list[Path]
     if len(matches) > 1:
         raise ValueError(f"Multiple matches for '{document}': {[match.name for match in matches]}")
     return matches
+
+
+def _existing_image_page_numbers(image_paths: list[Path], doc_stem: str) -> list[int | None]:
+    """Return page numbers encoded in existing image filenames."""
+    page_numbers: list[int | None] = []
+    pattern = re.compile(rf"^{re.escape(doc_stem)}\.(\d+)\.jpg$")
+    for image_path in image_paths:
+        match = pattern.fullmatch(image_path.name)
+        page_numbers.append(int(match.group(1)) if match else None)
+    return page_numbers
+
+
+def reusable_existing_images(
+    image_paths: list[Path], doc_stem: str, expected_page_count: int
+) -> bool:
+    """Return True when existing images are a complete ordered page set."""
+    return _existing_image_page_numbers(image_paths, doc_stem) == list(
+        range(1, expected_page_count + 1)
+    )
 
 
 def select_documents_to_process(
@@ -434,6 +454,34 @@ def process_single_pdf(
         for img_path in existing_images:
             img_path.unlink()
         existing_images = []
+
+    if existing_images:
+        try:
+            expected_page_count = count_pdf_pages(working_pdf_path)
+        except Exception as exc:
+            logger.warning(
+                "Could not validate existing images for %s: %s",
+                pdf_path.name,
+                exc,
+            )
+        else:
+            if not reusable_existing_images(
+                existing_images,
+                doc_stem,
+                expected_page_count,
+            ):
+                found_pages = _existing_image_page_numbers(existing_images, doc_stem)
+                logger.info(
+                    "Discarding %s stale existing images for %s "
+                    "(found pages %s, expected pages 1-%s)",
+                    len(existing_images),
+                    pdf_path.name,
+                    found_pages,
+                    expected_page_count,
+                )
+                for img_path in existing_images:
+                    img_path.unlink()
+                existing_images = []
 
     temp_dir = None
     try:

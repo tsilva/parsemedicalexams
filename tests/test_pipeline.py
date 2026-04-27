@@ -132,6 +132,56 @@ def test_select_documents_to_process_skips_complete_outputs(tmp_path, monkeypatc
     assert already_processed == 1
 
 
+def test_process_single_pdf_discards_incomplete_existing_images(tmp_path, monkeypatch):
+    pdf_path = tmp_path / "exam.pdf"
+    pdf_path.write_bytes(b"pdf")
+    output_path = tmp_path / "out"
+    doc_dir = output_path / "exam"
+    doc_dir.mkdir(parents=True)
+    config = make_runtime_config(tmp_path)
+    config.output_path = output_path
+
+    stale_image = doc_dir / "exam.002.jpg"
+    stale_image.write_bytes(b"stale")
+    generated_images = [tmp_path / "exam.001.jpg", tmp_path / "exam.002.jpg"]
+    for generated_image in generated_images:
+        generated_image.write_bytes(b"generated")
+
+    classified_image_names = []
+
+    class NonExamClassification:
+        is_exam = False
+        reason = "not an exam"
+
+    monkeypatch.setattr(pipeline, "count_pdf_pages", lambda *args, **kwargs: 2)
+    monkeypatch.setattr(
+        pipeline,
+        "preprocess_pdf_images_to_temp",
+        lambda *args, **kwargs: (
+            SimpleNamespace(cleanup=lambda: None),
+            generated_images,
+        ),
+    )
+
+    def classify_document(image_paths, *args, **kwargs):
+        classified_image_names.extend(path.name for path in image_paths)
+        return NonExamClassification()
+
+    monkeypatch.setattr(pipeline, "classify_document", classify_document)
+    monkeypatch.setattr(pipeline, "copy_source_pdf", lambda *args, **kwargs: None)
+
+    result = pipeline.process_single_pdf(
+        pdf_path,
+        output_path,
+        config,
+        client=object(),
+    )
+
+    assert result == "skipped"
+    assert classified_image_names == ["exam.001.jpg", "exam.002.jpg"]
+    assert not stale_image.exists()
+
+
 def test_run_profile_dry_run_uses_process_loop(tmp_path, monkeypatch):
     config = patch_profile_loading(monkeypatch, tmp_path)
     calls = []
