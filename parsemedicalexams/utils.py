@@ -106,7 +106,7 @@ def extract_dates_from_text(text: str) -> list[str]:
 
 
 def setup_logging(log_dir: Path, clear_logs: bool = False) -> logging.Logger:
-    """Configure file and console logging, optionally clearing existing logs."""
+    """Configure detailed file logging and warning-or-higher console logging."""
     log_dir.mkdir(exist_ok=True)
     info_log_path = log_dir / "info.log"
     error_log_path = log_dir / "error.log"
@@ -135,7 +135,7 @@ def setup_logging(log_dir: Path, clear_logs: bool = False) -> logging.Logger:
     error_handler.setFormatter(file_formatter)
 
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(logging.WARNING)
     console_handler.setFormatter(console_formatter)
 
     root_logger.addHandler(info_handler)

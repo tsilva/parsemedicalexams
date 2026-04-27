@@ -159,7 +159,7 @@ def select_documents_to_process(
         return pdf_files, already_processed
 
     to_process: list[Path] = []
-    for pdf_path in pdf_files:
+    for pdf_path in tqdm(pdf_files, desc="Scanning PDFs", unit="pdf"):
         output_issue = get_document_output_issue(pdf_path, output_path)
         if output_issue is None:
             logger.info(
@@ -851,6 +851,7 @@ def log_output_assertions_report(
     grouped_issues = collect_output_assertions(pdf_files, output_path, input_path)
     if not grouped_issues:
         logger.info("%s passed with no issues", label)
+        print(f"{label}: passed")
         return True
 
     total_issues = sum(len(items) for items in grouped_issues.values())
@@ -859,7 +860,27 @@ def log_output_assertions_report(
         logger.error("%s (%s):", category.capitalize(), len(issues))
         for issue in issues:
             logger.error("  %s", issue)
+    print(f"{label}: failed ({total_issues} issue(s))")
     return False
+
+
+def print_run_summary(
+    *,
+    total_pdf_files: int,
+    processed_documents: int,
+    total_pages: int,
+    skipped_not_exams: int,
+    already_processed: int,
+    failed_count: int,
+) -> None:
+    """Print concise end-of-run results for the terminal."""
+    print("Pipeline complete")
+    print(f"Matched PDFs: {total_pdf_files}")
+    print(f"Processed: {processed_documents} document(s), {total_pages} page(s)")
+    print(f"Already processed: {already_processed}")
+    print(f"Skipped (not medical exams): {skipped_not_exams}")
+    if failed_count:
+        print(f"Failed: {failed_count}")
 
 
 def run_profile(profile_name: str, args: Namespace) -> bool:
@@ -1055,6 +1076,16 @@ def run_profile(profile_name: str, args: Namespace) -> bool:
             )
         if failed_count > 0:
             logger.warning("Would fail: %s documents", failed_count)
+        print("Dry run complete")
+        print(f"Matched PDFs: {len(pdf_files)}")
+        print(
+            f"Would process: {len(processed_documents)} document(s), "
+            f"{total_pages} page(s)"
+        )
+        print(f"Already processed: {already_processed}")
+        print(f"Would skip (not medical exams): {len(skipped_documents)}")
+        if failed_count:
+            print(f"Would fail: {failed_count}")
         return True
 
     logger.info("=" * 60)
@@ -1073,6 +1104,15 @@ def run_profile(profile_name: str, args: Namespace) -> bool:
         logger.info("Skipped Documents (review for false negatives):")
         for doc_name in skipped_documents:
             logger.info("  - %s", doc_name)
+
+    print_run_summary(
+        total_pdf_files=len(pdf_files),
+        processed_documents=len(processed_documents),
+        total_pages=total_pages,
+        skipped_not_exams=len(skipped_documents),
+        already_processed=already_processed,
+        failed_count=failed_count,
+    )
 
     return log_output_assertions_report(
         pdf_files,
