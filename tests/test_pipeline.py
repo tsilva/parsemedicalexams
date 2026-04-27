@@ -271,6 +271,29 @@ def test_run_profile_regenerate_uses_summary_regeneration(tmp_path, monkeypatch)
     assert calls[0][1] is None
 
 
+def test_run_profile_resummarize_passes_document_filter(tmp_path, monkeypatch):
+    config = patch_profile_loading(monkeypatch, tmp_path)
+    calls = []
+    pdf_path = config.input_path / "exam.pdf"
+    pdf_path.write_bytes(b"pdf")
+
+    monkeypatch.setattr(
+        pipeline,
+        "regenerate_summaries",
+        lambda output_path, config, client, input_path, doc_filter=None: (
+            calls.append((output_path, doc_filter)) or 3
+        ),
+    )
+    monkeypatch.setattr(pipeline, "discover_pdf_files", lambda *args, **kwargs: [pdf_path])
+    monkeypatch.setattr(pipeline, "log_output_assertions_report", lambda *args, **kwargs: True)
+
+    assert pipeline.run_profile(
+        "test",
+        make_args(resummarize=True, document="exam.pdf"),
+    ) is True
+    assert calls == [(config.output_path, "exam.pdf")]
+
+
 def test_run_profile_normal_processes_and_validates_outputs(tmp_path, monkeypatch):
     config = patch_profile_loading(monkeypatch, tmp_path)
     pdf_path = config.input_path / "exam.pdf"

@@ -26,7 +26,6 @@ from .document_io import (
     persist_temp_images,
     preprocess_pdf_images_to_temp,
     purge_derived_outputs,
-    regenerate_summaries,
     remove_skip_marker,
     save_document_summary,
     save_transcription_file,
@@ -41,6 +40,7 @@ from .extraction import (
     transcribe_with_retry,
 )
 from .models import ExamRecord
+from .regeneration import regenerate_summaries
 from .standardization import standardize_exam_types
 from .summarization import summarize_document
 from .utils import extract_dates_from_text, setup_logging
@@ -743,8 +743,8 @@ def process_single_pdf(
                 try:
                     exam = future.result()
                     all_exams.append(exam)
-                except Exception as exc:
-                    logger.error("Page %s processing failed: %s", page_num, exc)
+                except Exception:
+                    logger.exception("Page %s processing failed", page_num)
                     page_errors.append(page_num)
 
         if page_errors:
@@ -1024,8 +1024,8 @@ def run_profile(profile_name: str, args: Namespace) -> bool:
                 birth_date=profile.birth_date,
                 force_regenerate_images=bool(args.document),
             )
-        except Exception as exc:
-            logger.error("Failed to process %s: %s", pdf_path.name, exc)
+        except Exception:
+            logger.exception("Failed to process %s", pdf_path.name)
             failed_count += 1
             continue
 

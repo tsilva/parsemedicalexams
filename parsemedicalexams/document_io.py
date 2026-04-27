@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import cast
 
 import yaml  # type: ignore[import-untyped]
 from PIL import Image  # type: ignore[import-untyped]
@@ -23,12 +23,13 @@ from .models import (
     ALLOWED_SOURCE_MODES,
     ALLOWED_VALIDATION_STATUSES,
     ENHANCED_PAGE_FIELDS,
+    FRONTMATTER_FIELD_MAP,
+    FRONTMATTER_FIELDS,
     PAGE_ONLY_METADATA_FIELDS,
     REQUIRED_METADATA_FIELDS,
     ExamFrontmatter,
     ExamRecord,
 )
-from .summarization import summarize_document
 from .utils import preprocess_page_image
 from .validation import (
     determine_page_strategy,
@@ -36,11 +37,6 @@ from .validation import (
     validate_page_output,
     validate_summary_output,
 )
-
-if TYPE_CHECKING:
-    from openai import OpenAI
-
-    from .config import ExtractionConfig
 
 logger = logging.getLogger(__name__)
 SKIP_MARKER_FILENAME = ".skip"
@@ -255,21 +251,12 @@ def build_exam_frontmatter(
     extra_fields: ExamFrontmatter | None = None,
 ) -> ExamFrontmatter:
     """Build YAML frontmatter from a serialized exam record."""
-    frontmatter: ExamFrontmatter = {}
-    if exam.exam_date:
-        frontmatter["exam_date"] = exam.exam_date
-    if exam.exam_name_raw:
-        frontmatter["exam_name_raw"] = exam.exam_name_raw
-    if exam.exam_name_standardized:
-        frontmatter["title"] = exam.exam_name_standardized
-    if exam.exam_type:
-        frontmatter["category"] = exam.exam_type
-    if exam.physician_name:
-        frontmatter["doctor"] = exam.physician_name
-    if exam.facility_name:
-        frontmatter["facility"] = exam.facility_name
-    if exam.department:
-        frontmatter["department"] = exam.department
+    mapped = {
+        frontmatter_key: value
+        for exam_key, frontmatter_key in FRONTMATTER_FIELD_MAP.items()
+        if (value := getattr(exam, exam_key)) is not None and value != ""
+    }
+    frontmatter = cast(ExamFrontmatter, mapped)
     if extra_fields:
         frontmatter.update(extra_fields)
     return frontmatter
@@ -315,31 +302,58 @@ def _coerce_frontmatter(raw: object) -> ExamFrontmatter:
     if not isinstance(raw, dict):
         return {}
 
-    frontmatter: ExamFrontmatter = {}
-    for key in (
-        "exam_date",
-        "exam_name_raw",
-        "title",
-        "category",
-        "doctor",
-        "facility",
-        "department",
-        "page",
-        "source",
-        "prompt_variant",
-        "page_kind",
-        "validation_status",
-        "failure_type",
-        "source_mode",
-        "chart_type",
-        "chart_data_status",
-        "retry_attempts",
-        "confidence",
-    ):
-        value = raw.get(key)
-        if value is not None:
+    frontmatter: dict[str, object] = {}
+    raw_mapping = {key: raw.get(key) for key in FRONTMATTER_FIELDS}
+
+    for key in ("exam_date", "exam_name_raw", "title", "doctor", "facility", "department"):
+        value = raw_mapping.get(key)
+        if isinstance(value, str):
             frontmatter[key] = value
-    return frontmatter
+
+    category = raw_mapping.get("category")
+    if isinstance(category, str) and category in ALLOWED_CATEGORIES:
+        frontmatter["category"] = category
+
+    page = raw_mapping.get("page")
+    if isinstance(page, int) and not isinstance(page, bool):
+        frontmatter["page"] = page
+
+    for key in ("source", "prompt_variant", "failure_type"):
+        value = raw_mapping.get(key)
+        if isinstance(value, str):
+            frontmatter[key] = value
+
+    page_kind = raw_mapping.get("page_kind")
+    if isinstance(page_kind, str) and page_kind in ALLOWED_PAGE_KINDS:
+        frontmatter["page_kind"] = page_kind
+
+    validation_status = raw_mapping.get("validation_status")
+    if isinstance(validation_status, str) and validation_status in ALLOWED_VALIDATION_STATUSES:
+        frontmatter["validation_status"] = validation_status
+
+    source_mode = raw_mapping.get("source_mode")
+    if isinstance(source_mode, str) and source_mode in ALLOWED_SOURCE_MODES:
+        frontmatter["source_mode"] = source_mode
+
+    chart_type = raw_mapping.get("chart_type")
+    if isinstance(chart_type, str) and chart_type in ALLOWED_CHART_TYPES:
+        frontmatter["chart_type"] = chart_type
+
+    chart_data_status = raw_mapping.get("chart_data_status")
+    if (
+        isinstance(chart_data_status, str)
+        and chart_data_status in ALLOWED_CHART_DATA_STATUSES
+    ):
+        frontmatter["chart_data_status"] = chart_data_status
+
+    retry_attempts = raw_mapping.get("retry_attempts")
+    if isinstance(retry_attempts, int) and not isinstance(retry_attempts, bool):
+        frontmatter["retry_attempts"] = retry_attempts
+
+    confidence = raw_mapping.get("confidence")
+    if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
+        frontmatter["confidence"] = float(confidence)
+    return cast(ExamFrontmatter, frontmatter)
 
 
 def parse_frontmatter(content: str) -> tuple[ExamFrontmatter, str]:
@@ -367,30 +381,81 @@ def frontmatter_to_exam(
     source_file: str | None = None,
 ) -> ExamRecord:
     """Convert frontmatter fields to the shared internal exam record."""
-    page = frontmatter.get("page")
-    source = frontmatter.get("source")
-    confidence = frontmatter.get("confidence")
-    retry_attempts = frontmatter.get("retry_attempts")
+    raw_frontmatter = cast(dict[str, object], frontmatter)
+
+    def mapped_str(exam_key: str) -> str | None:
+        value = raw_frontmatter.get(FRONTMATTER_FIELD_MAP[exam_key])
+        return value if isinstance(value, str) else None
+
+    page = raw_frontmatter.get("page")
+    source = raw_frontmatter.get("source")
+    confidence = raw_frontmatter.get("confidence")
+    retry_attempts = raw_frontmatter.get("retry_attempts")
+    category = mapped_str("exam_type")
+    page_kind = raw_frontmatter.get("page_kind")
+    validation_status = raw_frontmatter.get("validation_status")
+    prompt_variant = raw_frontmatter.get("prompt_variant")
+    failure_type = raw_frontmatter.get("failure_type")
+    source_mode = raw_frontmatter.get("source_mode")
+    chart_type = raw_frontmatter.get("chart_type")
+    chart_data_status = raw_frontmatter.get("chart_data_status")
+    prompt_variant_value = prompt_variant if isinstance(prompt_variant, str) else None
+    page_kind_value = (
+        page_kind
+        if isinstance(page_kind, str) and page_kind in ALLOWED_PAGE_KINDS
+        else "text"
+    )
+    validation_status_value = (
+        validation_status
+        if isinstance(validation_status, str)
+        and validation_status in ALLOWED_VALIDATION_STATUSES
+        else "ok"
+    )
+    failure_type_value = failure_type if isinstance(failure_type, str) else None
+    source_mode_value = (
+        source_mode
+        if isinstance(source_mode, str) and source_mode in ALLOWED_SOURCE_MODES
+        else "vision"
+    )
+    chart_type_value = (
+        chart_type
+        if isinstance(chart_type, str) and chart_type in ALLOWED_CHART_TYPES
+        else None
+    )
+    chart_data_status_value = (
+        chart_data_status
+        if isinstance(chart_data_status, str)
+        and chart_data_status in ALLOWED_CHART_DATA_STATUSES
+        else None
+    )
     return ExamRecord(
-        exam_date=frontmatter.get("exam_date"),
-        exam_name_raw=frontmatter.get("exam_name_raw") or "",
-        exam_name_standardized=frontmatter.get("title"),
-        exam_type=frontmatter.get("category"),
-        physician_name=frontmatter.get("doctor"),
-        facility_name=frontmatter.get("facility"),
-        department=frontmatter.get("department"),
-        transcription_confidence=confidence if isinstance(confidence, (int, float)) else None,
+        exam_date=mapped_str("exam_date"),
+        exam_name_raw=mapped_str("exam_name_raw") or "",
+        exam_name_standardized=mapped_str("exam_name_standardized"),
+        exam_type=category if category in ALLOWED_CATEGORIES else None,
+        physician_name=mapped_str("physician_name"),
+        facility_name=mapped_str("facility_name"),
+        department=mapped_str("department"),
+        transcription_confidence=(
+            confidence
+            if isinstance(confidence, (int, float)) and not isinstance(confidence, bool)
+            else None
+        ),
         transcription=transcription,
         page_number=page if isinstance(page, int) and page > 0 else page_num,
         source_file=source if isinstance(source, str) else (source_file or ""),
-        prompt_variant=frontmatter.get("prompt_variant"),
-        page_kind=frontmatter.get("page_kind") or "text",
-        validation_status=frontmatter.get("validation_status") or "ok",
-        failure_type=frontmatter.get("failure_type"),
-        source_mode=frontmatter.get("source_mode") or "vision",
-        chart_type=frontmatter.get("chart_type"),
-        chart_data_status=frontmatter.get("chart_data_status"),
-        retry_attempts=retry_attempts if isinstance(retry_attempts, int) else 1,
+        prompt_variant=prompt_variant_value,
+        page_kind=page_kind_value,
+        validation_status=validation_status_value,
+        failure_type=failure_type_value,
+        source_mode=source_mode_value,
+        chart_type=chart_type_value,
+        chart_data_status=chart_data_status_value,
+        retry_attempts=(
+            retry_attempts
+            if isinstance(retry_attempts, int) and not isinstance(retry_attempts, bool)
+            else 1
+        ),
     )
 
 
@@ -621,6 +686,7 @@ def copy_source_pdf(source_pdf: Path, doc_output_dir: Path) -> None:
             "Could not copy PDF to output (permission denied): %s",
             source_pdf.name,
         )
+        raise
 
 
 def preprocess_pdf_images_to_temp(pdf_path: Path, doc_stem: str):
@@ -646,105 +712,6 @@ def persist_temp_images(temp_image_paths: list[Path], doc_output_dir: Path) -> l
         shutil.copy2(temp_image_path, final_image_path)
         image_paths.append(final_image_path)
     return image_paths
-
-
-def regenerate_summaries(
-    output_path: Path,
-    config: "ExtractionConfig",
-    client: "OpenAI",
-    input_path: Path | None = None,
-    doc_filter: str | None = None,
-) -> int:
-    """Regenerate document-level summary files from existing transcription markdown files."""
-    doc_dirs = [
-        doc_dir
-        for doc_dir in output_path.iterdir()
-        if doc_dir.is_dir() and doc_dir.name != "logs"
-    ]
-
-    if doc_filter:
-        query = doc_filter.lower()
-        query_stem = query[:-4] if query.endswith(".pdf") else query
-        doc_dirs = [
-            doc_dir
-            for doc_dir in doc_dirs
-            if doc_dir.name.lower() == query_stem or doc_dir.name.lower() == query
-        ]
-        if not doc_dirs:
-            logger.error("No matching document directory found for: %s", doc_filter)
-            return 0
-
-    logger.info("Found %s document directories to regenerate", len(doc_dirs))
-
-    total_exams = 0
-    for doc_dir in doc_dirs:
-        doc_stem = doc_dir.name
-
-        jpg_files = list(doc_dir.glob(f"{doc_stem}.*.jpg"))
-        md_transcription_files = transcription_files(doc_dir, doc_stem)
-        if jpg_files and len(jpg_files) != len(md_transcription_files):
-            logger.error(
-                "Skipping %s: page count mismatch — %s images but %s transcriptions",
-                doc_stem,
-                len(jpg_files),
-                len(md_transcription_files),
-            )
-            continue
-
-        if input_path:
-            source_pdfs = list(input_path.glob(f"**/{doc_stem}.pdf"))
-            if source_pdfs:
-                copy_source_pdf(source_pdfs[0], doc_dir)
-
-        md_files = sorted(transcription_files(doc_dir, doc_stem))
-        if not md_files:
-            logger.warning("No transcription files found in %s", doc_dir)
-            continue
-
-        all_exams: list[ExamRecord] = []
-        for md_path in md_files:
-            parts = md_path.stem.split(".")
-            if len(parts) < 2:
-                continue
-            try:
-                page_num = int(parts[-1])
-            except ValueError:
-                continue
-
-            frontmatter, transcription = parse_frontmatter(
-                md_path.read_text(encoding="utf-8")
-            )
-            all_exams.append(
-                frontmatter_to_exam(
-                    frontmatter,
-                    transcription,
-                    page_num,
-                    f"{doc_stem}.pdf",
-                )
-            )
-
-        if not all_exams:
-            logger.warning("No exams found in %s", doc_dir)
-            continue
-
-        for old_summary in doc_dir.glob("*.summary.md"):
-            old_summary.unlink()
-
-        document_summary = summarize_document(
-            all_exams,
-            config.summarize_model_id,
-            client,
-            max_input_tokens=config.summarize_max_input_tokens,
-        )
-        if first_blocking_issue(validate_summary_output(document_summary)):
-            logger.error("Summary validation failed for %s", doc_stem)
-            continue
-
-        save_document_summary(document_summary, doc_dir, doc_stem, all_exams)
-        logger.info("Regenerated summary for %s exams: %s", len(all_exams), doc_stem)
-        total_exams += len(all_exams)
-
-    return total_exams
 
 
 def validate_pipeline_outputs(pdf_files: list[Path], output_path: Path) -> list[str]:

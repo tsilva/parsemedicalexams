@@ -9,7 +9,10 @@ Medical Exams Parser extracts and summarizes medical exam reports (X-rays, MRIs,
 ## Commands
 
 ```bash
-# Verify all modules import cleanly (no test suite exists — this is the baseline check)
+# Run the test suite
+python3 -m pytest
+
+# Verify all modules import cleanly
 python3 -c "from parsemedicalexams import *; print('All imports OK')"
 
 # Install as an editable CLI tool
@@ -24,14 +27,12 @@ medicalexamsparser --profile tiago
 # List available profiles
 medicalexamsparser --list-profiles
 
-# Regenerate .md files from existing JSON extraction data
+# Regenerate summaries from existing transcription markdown
 medicalexamsparser --profile tiago --regenerate
 
 # Reprocess a specific document (by filename or stem)
 medicalexamsparser -p tiago -d exam_2024.pdf
 
-# Reprocess a specific page within a document
-medicalexamsparser -p tiago -d exam_2024.pdf --page 2
 ```
 
 ## Architecture
@@ -44,8 +45,10 @@ medicalexamsparser -p tiago -d exam_2024.pdf --page 2
 5. **Output**: Per-page transcription files + one comprehensive summary per document
 
 ### Key Modules
-- **main.py**: Pipeline orchestration, PDF processing loop, CLI argument handling
-- **extraction.py**: Pydantic models (`MedicalExam`, `MedicalExamReport`), Vision LLM extraction with function calling, self-consistency voting
+- **cli.py**: CLI argument handling and profile bootstrap
+- **pipeline.py**: Pipeline orchestration, PDF processing loop, run-mode handling
+- **extraction.py**: Document classification, Vision LLM transcription, self-consistency voting
+- **regeneration.py**: Summary regeneration orchestration from saved markdown
 - **standardization.py**: Exam type classification using LLM with persistent JSON cache in `~/.config/parsemedicalexams/cache/`
 - **summarization.py**: Document-level clinical summarization using LLM (preserves all clinical details for medical records)
 - **config.py**: `ExtractionConfig` + `ProfileConfig` loaded from `~/.config/parsemedicalexams/`
@@ -66,16 +69,16 @@ Each document produces one summary file:
 
 ## Development Notes
 
-- **No test suite** — import verification above is the only automated baseline check
+- **Test suite** — run `python3 -m pytest`; import verification remains a useful quick check
 - **Worktrees**: `.worktrees/` is gitignored and ready to use; no setup needed
 - **Sandbox mode**: `uv tool install . --editable` and `medicalexamsparser --list-profiles` may fail in sandboxed environments; use the import check instead
 - **Dependencies already installed globally** — no reinstall needed when creating new worktrees
 - **Worktree cleanup order**: `git worktree remove` must run *before* `git branch -d` (git blocks branch deletion while a worktree has it checked out)
 
-## Key Helpers (main.py)
+## Key Helpers
 
-- `_FRONTMATTER_MAP` — canonical dict mapping exam dict keys → YAML frontmatter keys; used by `build_exam_frontmatter()` and `frontmatter_to_exam()`
-- `_transcription_files(doc_dir, doc_stem)` — returns all `.md` files in a doc dir excluding `.summary.md`
+- `FRONTMATTER_FIELD_MAP` — canonical dict mapping `ExamRecord` fields → YAML frontmatter keys; used by `build_exam_frontmatter()` and `frontmatter_to_exam()`
+- `transcription_files(doc_dir, doc_stem)` — returns all `.md` files in a doc dir excluding `.summary.md`
 - `extract_dates_from_text(text)` — in `utils.py`; extracts YYYY-MM-DD dates from DD/MM/YYYY, DD-MM-YYYY, and ISO formats
 - `self_consistency(fn, model_id, n, *args, client=None, **kwargs)` — pass the existing `OpenAI` client as `client=`; do not pass `base_url`/`api_key`
 

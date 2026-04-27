@@ -7,12 +7,18 @@ from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from .config import get_cache_dir
-from .models import StandardizedExamEntry
+from .models import ALLOWED_CATEGORIES, ExamCategory, StandardizedExamEntry
 from .utils import load_prompt, parse_json_mapping, require_completion_text
 
 logger = logging.getLogger(__name__)
 
 CACHE_DIR = get_cache_dir()
+
+
+def _validated_exam_type(exam_type: object, raw_name: str) -> ExamCategory:
+    if isinstance(exam_type, str) and exam_type in ALLOWED_CATEGORIES:
+        return exam_type
+    raise ValueError(f"Invalid exam_type for '{raw_name}': {exam_type!r}")
 
 
 def load_cache(name: str) -> dict[str, StandardizedExamEntry]:
@@ -35,7 +41,7 @@ def load_cache(name: str) -> dict[str, StandardizedExamEntry]:
                 standardized_name = value.get("standardized_name")
                 if isinstance(exam_type, str) and isinstance(standardized_name, str):
                     cache[key] = {
-                        "exam_type": exam_type,
+                        "exam_type": _validated_exam_type(exam_type, key),
                         "standardized_name": standardized_name,
                     }
             return cache
@@ -108,10 +114,11 @@ def standardize_exam_types(
                 raise ValueError(f"Missing standardization mapping for '{raw_name}'")
             exam_type = raw_entry.get("exam_type")
             standardized_name = raw_entry.get("standardized_name")
-            if not isinstance(exam_type, str) or not isinstance(standardized_name, str):
+            if not isinstance(standardized_name, str):
                 raise ValueError(f"Invalid standardization mapping for '{raw_name}'")
+            validated_exam_type = _validated_exam_type(exam_type, raw_name)
             cache[_cache_key(raw_name)] = {
-                "exam_type": exam_type,
+                "exam_type": validated_exam_type,
                 "standardized_name": standardized_name,
             }
 

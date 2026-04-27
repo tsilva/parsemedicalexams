@@ -2,20 +2,23 @@ import os
 import shutil
 from types import SimpleNamespace
 
+import pytest
+
 from parsemedicalexams.document_io import (
     collect_output_assertions,
+    copy_source_pdf,
     extract_doc_date_prefix,
     frontmatter_to_exam,
     get_document_output_issue,
     parse_frontmatter,
     pdf_copy_is_current,
-    regenerate_summaries,
     save_transcription_file,
     validate_frontmatter,
     validate_orphan_output_dirs,
     write_markdown_with_frontmatter,
 )
 from parsemedicalexams.models import ExamRecord
+from parsemedicalexams.regeneration import regenerate_summaries
 
 
 def make_exam(**overrides):
@@ -63,6 +66,44 @@ def test_frontmatter_round_trip_preserves_extended_fields(tmp_path):
     assert rebuilt.chart_type == "audiogram"
     assert rebuilt.chart_data_status == "ok"
     assert rebuilt.transcription_confidence == 0.95
+
+
+def test_parse_frontmatter_does_not_trust_invalid_field_types():
+    content = """---
+exam_date: '2024-01-15'
+exam_name_raw: 123
+title: Valid Title
+category: invalid-category
+page: "1"
+source: exam.pdf
+prompt_variant: 42
+page_kind: bad-kind
+validation_status: ok
+source_mode: bad-mode
+chart_type: audiogram
+chart_data_status: wrong-status
+retry_attempts: true
+confidence: false
+---
+
+Body text.
+"""
+
+    frontmatter, _ = parse_frontmatter(content)
+
+    assert "exam_date" in frontmatter
+    assert "title" in frontmatter
+    assert "exam_name_raw" not in frontmatter
+    assert "category" not in frontmatter
+    assert "page" not in frontmatter
+    assert "prompt_variant" not in frontmatter
+    assert "page_kind" not in frontmatter
+    assert frontmatter["validation_status"] == "ok"
+    assert "source_mode" not in frontmatter
+    assert frontmatter["chart_type"] == "audiogram"
+    assert "chart_data_status" not in frontmatter
+    assert "retry_attempts" not in frontmatter
+    assert "confidence" not in frontmatter
 
 
 def test_get_document_output_issue_detects_changed_source_pdf(tmp_path):
@@ -116,6 +157,21 @@ def test_pdf_copy_is_current_accepts_sub_microsecond_mtime_drift(tmp_path, monke
     )
 
     assert pdf_copy_is_current(source_pdf, copied_pdf) is True
+
+
+def test_copy_source_pdf_propagates_permission_error(tmp_path, monkeypatch):
+    source_pdf = tmp_path / "exam.pdf"
+    source_pdf.write_bytes(b"source")
+    doc_dir = tmp_path / "out"
+    doc_dir.mkdir()
+
+    def deny_copy(*args, **kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr("parsemedicalexams.document_io.shutil.copy2", deny_copy)
+
+    with pytest.raises(PermissionError, match="denied"):
+        copy_source_pdf(source_pdf, doc_dir)
 
 
 def test_get_document_output_issue_rejects_transcription_without_prompt_variant(
@@ -335,7 +391,7 @@ def test_validate_frontmatter_detects_page_metadata_invariants(tmp_path):
 
     issues = validate_frontmatter(output_path)
 
-    assert f"invalid_category: {doc_stem}.001.md" in issues
+    assert f"missing_fields=['category']: {doc_stem}.001.md" in issues
     assert f"page_number_mismatch_filename: {doc_stem}.001.md" in issues
     assert f"source_mismatch_doc_pdf: {doc_stem}.001.md" in issues
     assert f"missing_prompt_variant: {doc_stem}.001.md" in issues
@@ -406,7 +462,7 @@ def test_regenerate_summaries_reads_markdown_and_writes_summary(tmp_path, monkey
     save_transcription_file([make_exam(page_kind="text")], doc_dir, "exam", 1)
 
     monkeypatch.setattr(
-        "parsemedicalexams.document_io.summarize_document",
+        "parsemedicalexams.regeneration.summarize_document",
         lambda exams, model_id, client, max_input_tokens: (
             "Comprehensive summary with enough length to pass validation."
         ),

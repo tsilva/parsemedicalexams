@@ -59,6 +59,10 @@ path = "parsemedicalexams/__init__.py"
 
 [tool.ruff]
 line-length = 100
+exclude = [
+    ".agents",
+    ".claude",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]

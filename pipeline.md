@@ -36,7 +36,11 @@ Entry point: `parsemedicalexams.cli:main() → parsemedicalexams.pipeline.run_pr
 
 ### Profile Files (`profiles/*.yaml` or `profiles/*.json`)
 
-Profiles override `.env` paths and optionally model/workers. Fields: `name`, `input_path`, `output_path`, `input_file_regex`, `model`, `workers`, `full_name`, `birth_date`, `locale`.
+Profiles override `.env` paths and optionally model/processing settings. Common fields:
+`name`, `input_path`, `output_path`, `input_file_regex`, `extract_model_id`,
+`summarize_model_id`, `self_consistency_model_id`, `validation_model_id`,
+`max_workers`, `n_extractions`, `summarize_max_input_tokens`, `full_name`,
+`birth_date`, `locale`.
 
 **Override priority:** CLI args > profile > `.env`
 
@@ -89,7 +93,7 @@ The response is parsed into `DocumentClassification`:
 | `physician_name` | Signing physician |
 | `department` | Department/service |
 
-**Fail-open:** errors and missing tool calls default to `is_exam=True`. Non-exams return `"skipped"` and are not processed further. The CLI currently rejects `--page` before orchestration begins.
+Errors and missing tool calls fail the document. Non-exams return `"skipped"` and are not processed further.
 
 **Prompts:** `prompts/classification_system.md` (formatted with `{patient_context}`), `prompts/classification_user.md`
 
@@ -178,7 +182,7 @@ The corrected date is written back to all exam dicts.
 Maps raw exam names to `(exam_type, standardized_name)` with a persistent cache:
 
 ```
-Cache file: config/cache/exam_type_standardization.json
+Cache file: `~/.config/parsemedicalexams/cache/exam_type_standardization.json`
 Cache key:  name.lower().strip()
 ```
 
@@ -193,9 +197,9 @@ client.chat.completions.create(
 # Returns JSON: { raw_name: { exam_type, standardized_name } }
 ```
 
-Cache is saved after each batch. Failures fall back to `exam_type="other"` with the raw name as-is. The cache is user-editable for manual overrides.
+Cache is saved after each batch. Invalid or missing LLM/cache mappings fail the document. The cache is user-editable for manual overrides.
 
-**Exam types:** `imaging`, `ultrasound`, `endoscopy`, `other`
+**Exam types:** `appointment`, `endoscopy`, `imaging`, `other`, `prescription`, `ultrasound`
 
 ---
 
@@ -205,7 +209,7 @@ Cache is saved after each batch. Failures fall back to `exam_type="other"` with 
 
 Output file: `{output_path}/{doc_stem}/{doc_stem}.{page_num:03d}.md`
 
-YAML frontmatter is built from `_FRONTMATTER_MAP`:
+YAML frontmatter is built from `FRONTMATTER_FIELD_MAP`:
 
 | Exam dict key | Frontmatter key |
 |---|---|

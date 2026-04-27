@@ -68,6 +68,11 @@ PAGE_ONLY_METADATA_FIELDS: Final[set[str]] = {
     "chart_data_status",
     "retry_attempts",
 }
+FRONTMATTER_FIELDS: Final[set[str]] = (
+    set(FRONTMATTER_FIELD_MAP.values())
+    | PAGE_ONLY_METADATA_FIELDS
+    | {"confidence"}
+)
 ENHANCED_PAGE_FIELDS: Final[set[str]] = {
     "page_kind",
     "validation_status",

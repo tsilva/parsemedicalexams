@@ -62,7 +62,7 @@ Then edit `~/.config/parsemedicalexams/tsilva.yaml` with your profile-specific s
 name: tsilva
 input_path: /path/to/your/exam/pdfs
 output_path: /path/to/output
-workers: 4
+max_workers: 4
 ```
 
 ### 3. Run
@@ -116,7 +116,7 @@ name: myprofile
 input_path: /path/to/input
 output_path: /path/to/output
 input_file_regex: ".*\\.pdf"
-workers: 4
+max_workers: 4
 n_extractions: 3
 summarize_max_input_tokens: 100000
 full_name: "Patient Name"
@@ -141,12 +141,14 @@ VALIDATION_MODEL_ID=anthropic/claude-haiku-4.5
 | `--profile`, `-p` | Profile name to use |
 | `--list-profiles` | List available profiles |
 | `--regenerate` | Regenerate summaries from existing transcription markdown files |
+| `--resummarize` | Regenerate summaries only; use with `-d` to target one document |
 | `--reprocess-all` | Force reprocess all documents |
 | `--document`, `-d` | Process only this document (filename or stem) |
-| `--page` | Reserved for future safe page-only rebuilds; currently rejected by the CLI |
-| `--model`, `-m` | Override model ID |
+| `--model`, `-m` | Override all LLM model IDs for this run |
 | `--workers`, `-w` | Override worker count |
 | `--pattern` | Override input file regex |
+| `--audit-outputs` | Audit existing output bundles without processing PDFs |
+| `--dry-run` | Preview processing without LLM calls or writes |
 
 **Examples:**
 
@@ -221,13 +223,13 @@ parsemedicalexams/
 ├── cli.py               # Thin CLI entrypoint: args, bootstrap, profile loop
 ├── pipeline.py          # Run-mode resolution, document selection, orchestration
 ├── document_io.py       # Frontmatter, output audit, PDF text/image helpers
-├── extraction.py        # Pydantic models, Vision LLM extraction, voting
+├── extraction.py        # Document classification, Vision LLM transcription, voting
+├── regeneration.py      # Summary regeneration orchestration from saved markdown
 ├── standardization.py   # Exam type classification with JSON cache
 ├── summarization.py     # Document-level clinical summarization
 ├── config.py            # ExtractionConfig/ProfileConfig (global profile config)
 ├── utils.py             # Image preprocessing, logging, JSON utilities
 ├── __main__.py          # Package entrypoint shim
-├── ../main.py           # Backward-compatibility shim
 ├── prompts/             # Externalized LLM prompts as markdown
 └── profiles/            # Example profile template
 ```

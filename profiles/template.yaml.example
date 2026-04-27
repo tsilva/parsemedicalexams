@@ -12,7 +12,6 @@ input_file_regex: ".*\\.pdf"
 
 # Shared API key and model IDs live in ~/.config/parsemedicalexams/.env
 # You can still override them here if needed:
-# model: "google/gemini-2.5-flash"
 # extract_model_id: "google/gemini-2.5-flash"
 # summarize_model_id: "google/gemini-2.5-flash"
 # self_consistency_model_id: "google/gemini-2.5-flash"
@@ -22,7 +21,7 @@ input_file_regex: ".*\\.pdf"
 
 # Optional runtime config:
 # n_extractions: 3
-# workers: 4
+# max_workers: 4
 # summarize_max_input_tokens: 100000
 
 # Optional patient context

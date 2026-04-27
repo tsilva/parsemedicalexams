@@ -108,6 +108,25 @@ def test_standardize_exam_types_raises_on_empty_response(monkeypatch):
         standardize_exam_types(["Chest X-Ray"], "fake-model", client)
 
 
+def test_standardize_exam_types_rejects_invalid_exam_type_before_cache_write(monkeypatch):
+    client = FakeClient(
+        make_completion(
+            '{"Chest X-Ray": {"exam_type": "invalid", "standardized_name": "Chest X-Ray"}}'
+        )
+    )
+    saved = []
+    monkeypatch.setattr("parsemedicalexams.standardization.load_cache", lambda name: {})
+    monkeypatch.setattr(
+        "parsemedicalexams.standardization.save_cache",
+        lambda name, cache: saved.append((name, cache)),
+    )
+
+    with pytest.raises(ValueError, match="Invalid exam_type"):
+        standardize_exam_types(["Chest X-Ray"], "fake-model", client)
+
+    assert saved == []
+
+
 def test_llm_summarize_raises_on_empty_response():
     client = FakeClient(make_completion(None))
 
