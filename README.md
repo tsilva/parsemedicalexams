@@ -1,254 +1,114 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/tsilva/parsemedicalexams/main/logo.png" alt="parsemedicalexams" width="512"/>
+  <img src="./logo.png" alt="parsemedicalexams" width="420" />
 
   # parsemedicalexams
 
-  [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-  [![Python](https://img.shields.io/badge/Python-3.8+-green.svg)](https://python.org)
-  [![OpenRouter](https://img.shields.io/badge/Powered%20by-OpenRouter-purple.svg)](https://openrouter.ai)
-
   **🏥 Extract and summarize medical exam reports from PDFs using Vision AI 📄**
-
-  [Features](#features) · [Quick Start](#quick-start) · [Configuration](#configuration) · [Output Format](#output-format)
 </div>
 
----
+parsemedicalexams is a Python CLI for turning PDF medical exam reports into structured markdown. It converts PDF pages to images, uses Vision LLMs through OpenRouter to transcribe and classify exams, then writes per-page markdown plus a document-level clinical summary.
 
-## Features
+It is built for personal medical record workflows where scanned reports, radiology results, ultrasounds, endoscopies, and similar documents need to become searchable files with YAML frontmatter.
 
-[![CI](https://github.com/tsilva/parsemedicalexams/actions/workflows/release.yml/badge.svg)](https://github.com/tsilva/parsemedicalexams/actions/workflows/release.yml)
-
-- **Vision-powered extraction** — Uses Vision LLMs to read X-rays, MRIs, ultrasounds, endoscopies, and more directly from PDF scans
-- **Self-consistency voting** — Runs multiple extractions and votes on the best result for maximum reliability
-- **Intelligent classification** — Automatically categorizes exams (imaging, ultrasound, endoscopy, other) and standardizes naming
-- **Clinical summarization** — Preserves all findings, impressions, and recommendations while filtering noise
-- **Markdown output with YAML frontmatter** — Clean, structured files ready for Obsidian, static sites, or further processing
-- **Smart caching** — Persistent JSON caches avoid redundant API calls and allow manual overrides
-- **Multi-era document handling** — Frequency-based date voting correctly handles documents spanning multiple time periods
-
-## Quick Start
-
-### 1. Install
+## Install
 
 ```bash
+git clone https://github.com/tsilva/parsemedicalexams.git
+cd parsemedicalexams
 uv tool install . --editable
 ```
 
-> **Requires [Poppler](https://poppler.freedesktop.org/)** for PDF processing:
-> - macOS: `brew install poppler`
-> - Ubuntu: `apt-get install poppler-utils`
+Install Poppler before processing PDFs:
 
-### 2. Configure
+```bash
+brew install poppler          # macOS
+apt-get install poppler-utils # Ubuntu/Debian
+```
+
+## Configure
+
+Runtime config lives outside the repo in `~/.config/parsemedicalexams`.
 
 ```bash
 mkdir -p ~/.config/parsemedicalexams
 cp .env.example ~/.config/parsemedicalexams/.env
-cp profiles/template.yaml.example ~/.config/parsemedicalexams/tsilva.yaml
+cp profiles/template.yaml.example ~/.config/parsemedicalexams/myprofile.yaml
 ```
 
-Edit `~/.config/parsemedicalexams/.env` with your shared model/API settings:
+Edit `~/.config/parsemedicalexams/.env` with your OpenRouter key and model IDs:
 
 ```dotenv
-OPENROUTER_API_KEY=your_api_key_here
+OPENROUTER_API_KEY=your_api_key
 EXTRACT_MODEL_ID=google/gemini-2.5-flash
 SUMMARIZE_MODEL_ID=google/gemini-2.5-flash
 SELF_CONSISTENCY_MODEL_ID=google/gemini-2.5-flash
 VALIDATION_MODEL_ID=anthropic/claude-haiku-4.5
 ```
 
-Then edit `~/.config/parsemedicalexams/tsilva.yaml` with your profile-specific settings:
+Edit `~/.config/parsemedicalexams/myprofile.yaml` with your input and output folders:
 
 ```yaml
-name: tsilva
-input_path: /path/to/your/exam/pdfs
-output_path: /path/to/output
-max_workers: 4
-```
-
-### 3. Run
-
-```bash
-medicalexamsparser --profile tsilva
-```
-
-## How It Works
-
-```
-┌─────────────┐    ┌─────────────────┐    ┌────────────────┐    ┌──────────────┐    ┌────────────┐
-│  PDF Input  │───▶│  Preprocessing  │───▶│ Vision LLM ×N  │───▶│ Standardize  │───▶│  Markdown  │
-│             │    │  (grayscale,    │    │  + voting      │    │  + classify  │    │   Output   │
-│             │    │   resize)       │    │                │    │              │    │            │
-└─────────────┘    └─────────────────┘    └────────────────┘    └──────────────┘    └────────────┘
-```
-
-1. **PDF → Images** — Converts each page to grayscale, resizes, and enhances contrast
-2. **Document classification** — Determines if the document is a medical exam before processing
-3. **Vision LLM transcription** — Transcribes each page verbatim using function calling (runs N times for reliability)
-4. **Self-consistency voting** — If transcriptions differ, LLM votes on the best result
-5. **Standardization** — Classifies exam type and standardizes the name via LLM with caching
-6. **Summarization** — Generates document-level clinical summaries preserving all findings
-
-## Configuration
-
-### Profiles
-
-Runtime configuration is split across:
-- `~/.config/parsemedicalexams/.env` for shared API/model settings
-- `~/.config/parsemedicalexams/*.yaml|json` for per-profile paths and patient context
-
-```bash
-# Create the shared env file and a profile
-mkdir -p ~/.config/parsemedicalexams
-cp .env.example ~/.config/parsemedicalexams/.env
-cp profiles/template.yaml.example ~/.config/parsemedicalexams/myprofile.yaml
-
-# Run with profile
-medicalexamsparser --profile myprofile
-
-# List available profiles
-medicalexamsparser --list-profiles
-```
-
-Profiles can be YAML or JSON. A flat YAML profile looks like this:
-
-```yaml
-name: myprofile
-input_path: /path/to/input
-output_path: /path/to/output
+name: "myprofile"
+input_path: "/path/to/your/exam/pdfs"
+output_path: "/path/to/your/output"
 input_file_regex: ".*\\.pdf"
 max_workers: 4
-n_extractions: 3
-summarize_max_input_tokens: 100000
 full_name: "Patient Name"
 birth_date: "1980-01-31"
 locale: "pt-PT"
 ```
 
-Shared `.env` file:
-
-```dotenv
-OPENROUTER_API_KEY=your_api_key_here
-EXTRACT_MODEL_ID=google/gemini-2.5-flash
-SUMMARIZE_MODEL_ID=google/gemini-2.5-flash
-SELF_CONSISTENCY_MODEL_ID=google/gemini-2.5-flash
-VALIDATION_MODEL_ID=anthropic/claude-haiku-4.5
-```
-
-### CLI Options
-
-| Option | Description |
-|--------|-------------|
-| `--profile`, `-p` | Profile name to use |
-| `--list-profiles` | List available profiles |
-| `--regenerate` | Regenerate summaries from existing transcription markdown files |
-| `--resummarize` | Regenerate summaries only; use with `-d` to target one document |
-| `--reprocess-all` | Force reprocess all documents |
-| `--document`, `-d` | Process only this document (filename or stem) |
-| `--model`, `-m` | Override all LLM model IDs for this run |
-| `--workers`, `-w` | Override worker count |
-| `--pattern` | Override input file regex |
-| `--audit-outputs` | Audit existing output bundles without processing PDFs |
-| `--dry-run` | Preview processing without LLM calls or writes |
-
-**Examples:**
+Run the parser:
 
 ```bash
-# Process all new PDFs
-medicalexamsparser --profile tsilva
-
-# Regenerate summaries from existing transcription files
-medicalexamsparser --profile tsilva --regenerate
-
-# Force reprocess all documents
-medicalexamsparser --profile tsilva --reprocess-all
-
-# Reprocess a specific document
-medicalexamsparser -p tsilva -d exam_2024.pdf
+medicalexamsparser --profile myprofile
 ```
 
-## Output Format
+## Commands
 
-The parser generates structured markdown files with YAML frontmatter:
-
+```bash
+medicalexamsparser --list-profiles              # list profiles in ~/.config/parsemedicalexams
+medicalexamsparser --profile myprofile          # process new or incomplete PDFs
+medicalexamsparser -p myprofile -d exam.pdf     # reprocess one document by filename or stem
+medicalexamsparser -p myprofile --reprocess-all # force all matching PDFs to reprocess
+medicalexamsparser -p myprofile --regenerate    # rebuild summaries from saved page markdown
+medicalexamsparser -p myprofile --resummarize   # update summaries using current prompts/models
+medicalexamsparser -p myprofile --audit-outputs # validate existing output bundles
+medicalexamsparser -p myprofile --dry-run       # preview work without LLM calls or writes
+python3 -m pytest                               # run tests
 ```
+
+The package also installs `parsemedicalexams` as an alias for the same CLI.
+
+## Output
+
+Each processed PDF gets its own output folder:
+
+```text
 output/
-├── {document}/
-│   ├── {document}.pdf            # Source PDF copy
-│   ├── {document}.001.jpg        # Page 1 image
-│   ├── {document}.001.md         # Page 1 transcription + metadata
-│   ├── {document}.002.jpg        # Page 2 image
-│   ├── {document}.002.md         # Page 2 transcription + metadata
-│   └── {document}.summary.md     # Document-level summary
+└── {document}/
+    ├── {document}.pdf
+    ├── {document}.001.jpg
+    ├── {document}.001.md
+    ├── {document}.002.jpg
+    ├── {document}.002.md
+    └── {document}.summary.md
 ```
 
-### Transcription File Structure
+Page markdown files contain YAML frontmatter for fields such as `exam_date`, `title`, `category`, `exam_name_raw`, `doctor`, `facility`, `confidence`, `page`, and `source`, followed by the verbatim transcription.
 
-Each `.md` file contains YAML frontmatter with metadata followed by the verbatim transcription:
+## Notes
 
-```yaml
----
-exam_date: 2024-01-15
-title: "Chest X-Ray PA and Lateral"
-category: imaging
-exam_name_raw: "RX TORAX PA Y LAT"
-doctor: "Dr. Smith"
-facility: "Hospital Central"
-confidence: 0.95
-page: 1
-source: exam_2024.pdf
----
-
-[Full verbatim transcription text here...]
-```
-
-### Metadata Fields
-
-| Field | Description |
-|-------|-------------|
-| `exam_date` | Exam date (YYYY-MM-DD) |
-| `title` | Standardized exam name (English) |
-| `category` | Exam type: `imaging`, `ultrasound`, `endoscopy`, `other` |
-| `exam_name_raw` | Exam name exactly as written in document |
-| `doctor` | Physician name (if found) |
-| `facility` | Healthcare facility name |
-| `department` | Department within facility |
-| `confidence` | Self-consistency confidence score (0.0-1.0) |
-| `page` | Page number in source PDF |
-| `source` | Source PDF filename |
+- Requires Python 3.8+, Poppler, and an OpenRouter API key.
+- PDF page images and extracted text are sent to the configured OpenRouter-compatible API.
+- Prompts are stored in `prompts/*.md`; model defaults and API settings are stored in the shared `.env`.
+- Standardization caches live in `~/.config/parsemedicalexams/cache/*.json` and can be edited to override future mappings.
+- Profiles can be YAML or JSON and can override model IDs, worker count, input regex, and patient context.
 
 ## Architecture
 
-```
-parsemedicalexams/
-├── cli.py               # Thin CLI entrypoint: args, bootstrap, profile loop
-├── pipeline.py          # Run-mode resolution, document selection, orchestration
-├── document_io.py       # Frontmatter, output audit, PDF text/image helpers
-├── extraction.py        # Document classification, Vision LLM transcription, voting
-├── regeneration.py      # Summary regeneration orchestration from saved markdown
-├── standardization.py   # Exam type classification with JSON cache
-├── summarization.py     # Document-level clinical summarization
-├── config.py            # ExtractionConfig/ProfileConfig (global profile config)
-├── utils.py             # Image preprocessing, logging, JSON utilities
-├── __main__.py          # Package entrypoint shim
-├── prompts/             # Externalized LLM prompts as markdown
-└── profiles/            # Example profile template
-```
-
-### Key Design Patterns
-
-- **Two-phase processing**: Classify document first, then transcribe all pages
-- **Two-column naming**: `*_raw` (exact from document) + `*_standardized` (LLM-mapped)
-- **Persistent caching**: LLM standardization results cached in `~/.config/parsemedicalexams/cache/*.json`
-- **Editable caches**: Manually override cached values to fix misclassifications
-- **Shared env + per-profile config**: `.env` carries shared credentials/model defaults while profiles carry paths and patient context
-- **Frequency-based date voting**: Handles multi-era documents (e.g., 2024 cover letter + 1997 records)
-
-## Requirements
-
-- Python 3.8+
-- [Poppler](https://poppler.freedesktop.org/) for PDF processing
-- [OpenRouter API key](https://openrouter.ai) for Vision LLM access
+![parsemedicalexams architecture diagram](./architecture.png)
 
 ## License
 
-MIT
+[MIT](LICENSE)
