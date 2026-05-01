@@ -3,7 +3,7 @@ name = "parsemedicalexams"
 dynamic = ["version"]
 description = "Extract and summarize medical exam reports (X-rays, MRIs, ultrasounds, etc.) with AI precision"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = "MIT"
 authors = [
     {name = "Tiago Silva", email = "tiago@tsilva.com"}
@@ -13,7 +13,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Healthcare Industry",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
