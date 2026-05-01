@@ -56,6 +56,28 @@ build-backend = "hatchling.build"
 [tool.hatch.version]
 path = "parsemedicalexams/__init__.py"
 
+[tool.hatch.build]
+skip-excluded-dirs = true
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "parsemedicalexams",
+    "prompts",
+    "tests",
+    ".env.example",
+    "LICENSE",
+    "README.md",
+    "pyproject.toml",
+    "uv.lock",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["parsemedicalexams"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"prompts" = "prompts"
+".env.example" = ".env.example"
+
 [tool.ruff]
 line-length = 100
 exclude = [
