@@ -124,6 +124,16 @@ def match_requested_document(pdf_files: list[Path], document: str) -> list[Path]
     return matches
 
 
+def _source_pdf_is_available(pdf_path: Path) -> bool:
+    """Return whether a discovered source PDF still exists and can be statted."""
+    try:
+        pdf_path.stat()
+    except FileNotFoundError:
+        logger.warning("Skipping missing source PDF after discovery: %s", pdf_path)
+        return False
+    return True
+
+
 def _existing_image_page_numbers(image_paths: list[Path], doc_stem: str) -> list[int | None]:
     """Return page numbers encoded in existing image filenames."""
     page_numbers: list[int | None] = []
@@ -153,14 +163,28 @@ def select_documents_to_process(
     already_processed = 0
 
     if document:
-        return match_requested_document(pdf_files, document), already_processed
+        matches = match_requested_document(pdf_files, document)
+        available_matches = [
+            pdf_path for pdf_path in matches if _source_pdf_is_available(pdf_path)
+        ]
+        if not available_matches:
+            raise ValueError(f"Document no longer exists after discovery: {document}")
+        return available_matches, already_processed
 
     if reprocess_all:
-        return pdf_files, already_processed
+        return [
+            pdf_path for pdf_path in pdf_files if _source_pdf_is_available(pdf_path)
+        ], already_processed
 
     to_process: list[Path] = []
     for pdf_path in tqdm(pdf_files, desc="Scanning PDFs", unit="pdf"):
-        output_issue = get_document_output_issue(pdf_path, output_path)
+        if not _source_pdf_is_available(pdf_path):
+            continue
+        try:
+            output_issue = get_document_output_issue(pdf_path, output_path)
+        except FileNotFoundError:
+            logger.warning("Skipping source PDF that disappeared while scanning: %s", pdf_path)
+            continue
         if output_issue is None:
             logger.info(
                 "Skipping (already processed): %s -> %s",

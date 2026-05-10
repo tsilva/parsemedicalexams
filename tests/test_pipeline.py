@@ -132,6 +132,52 @@ def test_select_documents_to_process_skips_complete_outputs(tmp_path, monkeypatc
     assert already_processed == 1
 
 
+def test_select_documents_to_process_skips_missing_discovered_pdfs(tmp_path, monkeypatch):
+    missing = tmp_path / "missing.pdf"
+    pending = tmp_path / "todo.pdf"
+    pending.write_bytes(b"todo")
+
+    monkeypatch.setattr(
+        pipeline,
+        "get_document_output_issue",
+        lambda pdf_path, output_path: "missing document summary",
+    )
+
+    to_process, already_processed = pipeline.select_documents_to_process(
+        [missing, pending],
+        tmp_path / "out",
+        document=None,
+        reprocess_all=False,
+    )
+
+    assert to_process == [pending]
+    assert already_processed == 0
+
+
+def test_select_documents_to_process_skips_pdfs_removed_during_scan(tmp_path, monkeypatch):
+    removed = tmp_path / "removed.pdf"
+    pending = tmp_path / "todo.pdf"
+    removed.write_bytes(b"removed")
+    pending.write_bytes(b"todo")
+
+    def output_issue(pdf_path, output_path):
+        if pdf_path == removed:
+            raise FileNotFoundError(str(pdf_path))
+        return "missing document summary"
+
+    monkeypatch.setattr(pipeline, "get_document_output_issue", output_issue)
+
+    to_process, already_processed = pipeline.select_documents_to_process(
+        [removed, pending],
+        tmp_path / "out",
+        document=None,
+        reprocess_all=False,
+    )
+
+    assert to_process == [pending]
+    assert already_processed == 0
+
+
 def test_process_single_pdf_discards_incomplete_existing_images(tmp_path, monkeypatch):
     pdf_path = tmp_path / "exam.pdf"
     pdf_path.write_bytes(b"pdf")
