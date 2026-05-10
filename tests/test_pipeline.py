@@ -178,6 +178,29 @@ def test_select_documents_to_process_skips_pdfs_removed_during_scan(tmp_path, mo
     assert already_processed == 0
 
 
+def test_select_most_frequent_date_uses_filename_date_when_visible():
+    exam = pipeline.ExamRecord(
+        exam_name_raw="Mamografia digital directa e ecografia mamaria",
+        exam_date="2025-04-22",
+        transcription=(
+            "Data Codigo Designacao do exame\n"
+            "07/05/2026 ECOMAM Ecografia Mamaria\n"
+            "07/05/2026 ECOMAM Ecografia Mamaria\n"
+            "Comparacao com mamografia de 22/04/2025."
+        ),
+        page_number=1,
+        source_file="2026-05-07 - exame - mamografia.pdf",
+    )
+
+    assert (
+        pipeline.select_most_frequent_date(
+            [exam],
+            filename_date="2026-05-07",
+        )
+        == "2026-05-07"
+    )
+
+
 def test_process_single_pdf_discards_incomplete_existing_images(tmp_path, monkeypatch):
     pdf_path = tmp_path / "exam.pdf"
     pdf_path.write_bytes(b"pdf")

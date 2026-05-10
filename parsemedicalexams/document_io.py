@@ -739,7 +739,10 @@ def validate_orphan_output_dirs(output_path: Path, input_path: Path) -> list[str
     return sorted(issues)
 
 
-def validate_frontmatter(output_path: Path) -> list[str]:
+def validate_frontmatter(
+    output_path: Path,
+    source_doc_stems: set[str] | None = None,
+) -> list[str]:
     """Validate that all .md files have YAML frontmatter with required fields."""
     issues = []
     doc_dirs = [
@@ -749,6 +752,8 @@ def validate_frontmatter(output_path: Path) -> list[str]:
     ]
     for doc_dir in doc_dirs:
         doc_stem = doc_dir.name
+        if source_doc_stems is not None and doc_stem not in source_doc_stems:
+            continue
         for md_path in doc_dir.glob(f"{doc_stem}.*.md"):
             try:
                 frontmatter, _ = parse_frontmatter(md_path.read_text(encoding="utf-8"))
@@ -780,9 +785,10 @@ def collect_output_assertions(
     input_path: Path,
 ) -> dict[str, list[str]]:
     """Collect post-run output assertions grouped by category."""
+    source_doc_stems = {pdf_path.stem for pdf_path in input_path.glob("**/*.pdf")}
     grouped_issues = {
         "output bundle issues": validate_pipeline_outputs(pdf_files, output_path),
-        "frontmatter issues": validate_frontmatter(output_path),
+        "frontmatter issues": validate_frontmatter(output_path, source_doc_stems),
         "orphaned output directories": validate_orphan_output_dirs(output_path, input_path),
     }
     return {

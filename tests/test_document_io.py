@@ -347,6 +347,38 @@ def test_collect_output_assertions_groups_all_post_run_issues(tmp_path):
     ]
 
 
+def test_collect_output_assertions_skips_frontmatter_checks_for_orphans(tmp_path):
+    input_path = tmp_path / "input"
+    output_path = tmp_path / "out"
+    input_path.mkdir()
+    output_path.mkdir()
+
+    source_pdf = input_path / "2025-08-22 - exam.pdf"
+    source_pdf.write_bytes(b"pdf")
+    orphan_stem = "2025-08-23 - old exam"
+    orphan_dir = output_path / orphan_stem
+    orphan_dir.mkdir()
+    write_markdown_with_frontmatter(
+        orphan_dir / f"{orphan_stem}.001.md",
+        {
+            "exam_date": "1984-11-16",
+            "exam_name_raw": "Old Exam",
+            "title": "Old Exam",
+            "category": "other",
+            "page": 1,
+            "source": f"{orphan_stem}.pdf",
+        },
+        "Body text long enough to avoid output-level empty checks.\n",
+    )
+
+    grouped = collect_output_assertions([source_pdf], output_path, input_path)
+
+    assert "frontmatter issues" not in grouped
+    assert grouped["orphaned output directories"] == [
+        f"{orphan_stem}: output directory has no matching source PDF"
+    ]
+
+
 def test_validate_frontmatter_detects_exam_date_mismatch_doc_prefix(tmp_path):
     output_path = tmp_path / "out"
     doc_stem = "2025-08-22 - exam"

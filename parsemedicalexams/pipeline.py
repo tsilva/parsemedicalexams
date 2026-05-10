@@ -402,7 +402,7 @@ def select_most_frequent_date(
                 if date not in excluded_dates
             ]
             if page_dates:
-                all_dates.append(min(page_dates))
+                all_dates.extend(page_dates)
 
     if not all_dates:
         all_dates = [exam.exam_date for exam in exams if exam.exam_date]
