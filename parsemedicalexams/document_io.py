@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -40,6 +41,34 @@ from .validation import (
 
 logger = logging.getLogger(__name__)
 SKIP_MARKER_FILENAME = ".skip"
+
+
+def _clear_file_flags(path: Path) -> None:
+    """Clear platform file flags that can prevent deleting generated outputs."""
+    chflags = getattr(os, "chflags", None)
+    if chflags is None:
+        return
+    try:
+        chflags(path, 0)
+    except OSError as exc:
+        logger.debug("Could not clear file flags for %s: %s", path, exc)
+
+
+def _clear_removal_flags(path: Path) -> None:
+    """Clear removable flags recursively before deleting an output directory."""
+    if path.is_symlink():
+        return
+    if not path.is_dir():
+        _clear_file_flags(path)
+        return
+
+    for root, dirnames, filenames in os.walk(path, topdown=False):
+        root_path = Path(root)
+        for filename in filenames:
+            _clear_file_flags(root_path / filename)
+        for dirname in dirnames:
+            _clear_file_flags(root_path / dirname)
+        _clear_file_flags(root_path)
 
 
 def extract_doc_date_prefix(name: str) -> str | None:
@@ -681,6 +710,7 @@ def copy_source_pdf(source_pdf: Path, doc_output_dir: Path) -> None:
         return
     try:
         shutil.copy2(source_pdf, copied_pdf)
+        _clear_file_flags(copied_pdf)
     except PermissionError:
         logger.warning(
             "Could not copy PDF to output (permission denied): %s",
@@ -724,19 +754,49 @@ def validate_pipeline_outputs(pdf_files: list[Path], output_path: Path) -> list[
     return issues
 
 
-def validate_orphan_output_dirs(output_path: Path, input_path: Path) -> list[str]:
-    """Validate that every output document directory maps to a source PDF in input_path."""
+def _orphan_output_dirs(output_path: Path, input_path: Path) -> list[Path]:
+    """Return output document directories with no matching source PDF."""
     if not output_path.exists():
         return []
 
     source_doc_stems = {pdf_path.stem for pdf_path in input_path.glob("**/*.pdf")}
-    issues: list[str] = []
-    for doc_dir in output_path.iterdir():
+    orphan_dirs: list[Path] = []
+    for doc_dir in sorted(output_path.iterdir()):
         if not doc_dir.is_dir() or doc_dir.name == "logs":
             continue
         if doc_dir.name not in source_doc_stems:
-            issues.append(f"{doc_dir.name}: output directory has no matching source PDF")
-    return sorted(issues)
+            orphan_dirs.append(doc_dir)
+    return orphan_dirs
+
+
+def purge_orphan_output_dirs(output_path: Path, input_path: Path) -> list[str]:
+    """Delete output document directories with no matching source PDF."""
+    deleted: list[str] = []
+    for doc_dir in _orphan_output_dirs(output_path, input_path):
+        try:
+            if doc_dir.is_symlink():
+                doc_dir.unlink()
+            else:
+                _clear_removal_flags(doc_dir)
+                shutil.rmtree(doc_dir)
+        except OSError as exc:
+            logger.error("Could not delete orphaned output directory %s: %s", doc_dir, exc)
+            continue
+
+        deleted.append(doc_dir.name)
+        logger.warning(
+            "Deleted orphaned output directory with no matching source PDF: %s",
+            doc_dir,
+        )
+    return deleted
+
+
+def validate_orphan_output_dirs(output_path: Path, input_path: Path) -> list[str]:
+    """Validate that every output document directory maps to a source PDF in input_path."""
+    return [
+        f"{doc_dir.name}: output directory has no matching source PDF"
+        for doc_dir in _orphan_output_dirs(output_path, input_path)
+    ]
 
 
 def validate_frontmatter(
@@ -785,6 +845,7 @@ def collect_output_assertions(
     input_path: Path,
 ) -> dict[str, list[str]]:
     """Collect post-run output assertions grouped by category."""
+    purge_orphan_output_dirs(output_path, input_path)
     source_doc_stems = {pdf_path.stem for pdf_path in input_path.glob("**/*.pdf")}
     grouped_issues = {
         "output bundle issues": validate_pipeline_outputs(pdf_files, output_path),

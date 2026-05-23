@@ -12,6 +12,7 @@ from parsemedicalexams.document_io import (
     get_document_output_issue,
     parse_frontmatter,
     pdf_copy_is_current,
+    purge_orphan_output_dirs,
     save_transcription_file,
     validate_frontmatter,
     validate_orphan_output_dirs,
@@ -329,6 +330,26 @@ def test_validate_orphan_output_dirs_detects_output_without_source_pdf(tmp_path)
     assert issues == ["orphan: output directory has no matching source PDF"]
 
 
+def test_purge_orphan_output_dirs_deletes_output_without_source_pdf(tmp_path):
+    input_path = tmp_path / "input"
+    output_path = tmp_path / "out"
+    input_path.mkdir()
+    output_path.mkdir()
+
+    (input_path / "exam.pdf").write_bytes(b"pdf")
+    (output_path / "exam").mkdir()
+    orphan_dir = output_path / "orphan"
+    orphan_dir.mkdir()
+    (output_path / "logs").mkdir()
+
+    deleted = purge_orphan_output_dirs(output_path, input_path)
+
+    assert deleted == ["orphan"]
+    assert not orphan_dir.exists()
+    assert (output_path / "exam").exists()
+    assert (output_path / "logs").exists()
+
+
 def test_collect_output_assertions_groups_all_post_run_issues(tmp_path):
     input_path = tmp_path / "input"
     output_path = tmp_path / "out"
@@ -337,14 +358,14 @@ def test_collect_output_assertions_groups_all_post_run_issues(tmp_path):
 
     source_pdf = input_path / "exam.pdf"
     source_pdf.write_bytes(b"pdf")
-    (output_path / "orphan").mkdir()
+    orphan_dir = output_path / "orphan"
+    orphan_dir.mkdir()
 
     grouped = collect_output_assertions([source_pdf], output_path, input_path)
 
     assert grouped["output bundle issues"] == ["exam: missing output folder"]
-    assert grouped["orphaned output directories"] == [
-        "orphan: output directory has no matching source PDF"
-    ]
+    assert "orphaned output directories" not in grouped
+    assert not orphan_dir.exists()
 
 
 def test_collect_output_assertions_skips_frontmatter_checks_for_orphans(tmp_path):
@@ -374,9 +395,8 @@ def test_collect_output_assertions_skips_frontmatter_checks_for_orphans(tmp_path
     grouped = collect_output_assertions([source_pdf], output_path, input_path)
 
     assert "frontmatter issues" not in grouped
-    assert grouped["orphaned output directories"] == [
-        f"{orphan_stem}: output directory has no matching source PDF"
-    ]
+    assert "orphaned output directories" not in grouped
+    assert not orphan_dir.exists()
 
 
 def test_validate_frontmatter_detects_exam_date_mismatch_doc_prefix(tmp_path):
