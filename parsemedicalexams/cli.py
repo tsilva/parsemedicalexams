@@ -22,15 +22,15 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  medicalexamsparser --profile tsilva              # Process all new PDFs
-  medicalexamsparser --list-profiles               # List available profiles
-  medicalexamsparser -p tsilva --regenerate        # Regenerate summaries only
-  medicalexamsparser -p tsilva --resummarize       # Resummarize all documents
-  medicalexamsparser -p tsilva --resummarize -d exam.pdf  # Resummarize one document
-  medicalexamsparser -p tsilva --reprocess-all     # Force reprocess all documents
-  medicalexamsparser -p tsilva -d exam.pdf         # Reprocess specific document
-  medicalexamsparser -p tsilva --audit-outputs     # Audit existing outputs
-  medicalexamsparser -p tsilva --dry-run           # Preview what would be processed
+  parsemedicalexams --profile tsilva              # Process all new PDFs
+  parsemedicalexams --list-profiles               # List available profiles
+  parsemedicalexams -p tsilva --regenerate        # Regenerate summaries only
+  parsemedicalexams -p tsilva --resummarize       # Resummarize all documents
+  parsemedicalexams -p tsilva --resummarize -d exam.pdf  # Resummarize one document
+  parsemedicalexams -p tsilva --reprocess-all     # Force reprocess all documents
+  parsemedicalexams -p tsilva -d exam.pdf         # Reprocess specific document
+  parsemedicalexams -p tsilva --audit-outputs     # Audit existing outputs
+  parsemedicalexams -p tsilva --dry-run           # Preview what would be processed
         """,
     )
     parser.add_argument("--profile", "-p", type=str, help="Profile name (without extension)")

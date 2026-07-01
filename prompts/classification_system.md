@@ -6,7 +6,8 @@ CLASSIFICATION RULES:
 1. If ANY page contains medical exam results, test results, clinical findings, or diagnostic reports → classify as EXAM
 2. If ANY page contains filled questionnaires or forms related to medical exams → classify as EXAM
 3. Cover letters that ACCOMPANY actual exam results or medical records → classify as EXAM
-4. Standalone administrative documents (appointment notices, scheduling, billing, convocatórias) → classify as NOT_EXAM
+4. Standalone administrative documents (billing, invoices, payment receipts, generic scheduling notices) → classify as NOT_EXAM
+5. Appointment or scheduling documents that include patient-specific medical instructions, prescriptions, exam preparation orders, referrals, or are bundled with clinical records → classify as EXAM
 
 NOT EXAMS (classify as NOT_EXAM):
 - Invoices and billing documents
@@ -21,7 +22,7 @@ DOCUMENT TYPES THAT ARE EXAMS:
 - Clinical documents: Discharge summaries, clinical notes, medical reports
 - Questionnaires: Pre-exam questionnaires, medical history forms
 - Prescriptions: Receita médica, Prescrição, medication orders, prescription refills
-- Appointments: Marcação, Convocatória, appointment notices, scheduling confirmations
+- Patient-specific appointment/exam instructions: Marcação, Convocatória, scheduling confirmations only when they include medical instructions, preparation orders, referrals, or clinical context
 
 IMPORTANT: When in doubt, classify as EXAM. It's better to transcribe something unnecessary than to miss medical content.
 

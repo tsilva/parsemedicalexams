@@ -1,8 +1,10 @@
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from parsemedicalexams.extraction import (
+    classify_document,
     score_transcription_confidence,
     validate_transcription,
     vote_on_best_result,
@@ -12,27 +14,51 @@ from parsemedicalexams.summarization import _llm_summarize
 from parsemedicalexams.utils import extract_completion_text
 
 
-def make_completion(content=None, include_choices=True, include_message=True):
+def make_completion(
+    content=None,
+    include_choices=True,
+    include_message=True,
+    tool_calls=None,
+    finish_reason="stop",
+):
     if not include_choices:
         return SimpleNamespace(choices=[])
 
     if not include_message:
         choice = SimpleNamespace()
     else:
-        choice = SimpleNamespace(message=SimpleNamespace(content=content))
+        choice = SimpleNamespace(
+            message=SimpleNamespace(content=content, tool_calls=tool_calls),
+            finish_reason=finish_reason,
+        )
 
     return SimpleNamespace(choices=[choice])
 
 
 class FakeClient:
     def __init__(self, completion):
-        self._completion = completion
+        self._completions = completion if isinstance(completion, list) else [completion]
+        self.calls = []
         self.chat = SimpleNamespace(
             completions=SimpleNamespace(create=self._create),
         )
 
     def _create(self, **kwargs):
-        return self._completion
+        self.calls.append(kwargs)
+        if len(self._completions) == 1:
+            return self._completions[0]
+        return self._completions.pop(0)
+
+
+def make_tool_call(arguments):
+    return [
+        SimpleNamespace(
+            function=SimpleNamespace(
+                name="classify_document",
+                arguments=json.dumps(arguments),
+            )
+        )
+    ]
 
 
 def test_extract_completion_text_returns_stripped_text():
@@ -77,6 +103,60 @@ def test_validate_transcription_allows_empty_refusal_response(caplog):
 
     assert (is_valid, reason) == (True, "ok")
     assert "Empty refusal check response" in caplog.text
+
+
+def test_classify_document_retries_missing_tool_call_for_gemini(tmp_path, caplog):
+    image_path = tmp_path / "page.jpg"
+    image_path.write_bytes(b"fake image")
+    client = FakeClient(
+        [
+            make_completion(tool_calls=None, finish_reason="length"),
+            make_completion(
+                tool_calls=make_tool_call(
+                    {
+                        "is_exam": True,
+                        "exam_name_raw": "Receita EZICLEN",
+                        "reason": "prescription",
+                    }
+                ),
+                finish_reason="tool_calls",
+            ),
+        ]
+    )
+
+    with caplog.at_level("WARNING"):
+        classification = classify_document(
+            [image_path],
+            "google/gemini-3.5-flash",
+            client,
+        )
+
+    assert classification.is_exam is True
+    assert classification.exam_name_raw == "Receita EZICLEN"
+    assert len(client.calls) == 2
+    assert client.calls[0]["max_tokens"] == 1024
+    assert "extra_body" not in client.calls[0]
+    assert client.calls[1]["max_tokens"] == 4096
+    assert client.calls[1]["extra_body"] == {"reasoning": {"effort": "minimal"}}
+    assert "finish_reason=length" in caplog.text
+
+
+def test_classify_document_reports_finish_reason_after_retry_failure(tmp_path):
+    image_path = tmp_path / "page.jpg"
+    image_path.write_bytes(b"fake image")
+    client = FakeClient(
+        [
+            make_completion(tool_calls=None, finish_reason="length"),
+            make_completion(tool_calls=None, finish_reason="length"),
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="finish_reason=length"):
+        classify_document(
+            [image_path],
+            "google/gemini-3.5-flash",
+            client,
+        )
 
 
 def test_vote_on_best_result_raises_on_empty_response():
