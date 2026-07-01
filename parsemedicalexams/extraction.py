@@ -5,7 +5,7 @@ import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Callable, cast
+from typing import Any, Callable, cast
 
 from openai import APIError, OpenAI
 from openai.types.chat import (
@@ -88,6 +88,65 @@ CLASSIFICATION_TOOL_CHOICE: ChatCompletionNamedToolChoiceParam = {
     "type": "function",
     "function": {"name": "classify_document"},
 }
+CLASSIFICATION_MAX_TOKENS = 1024
+CLASSIFICATION_RETRY_MAX_TOKENS = 4096
+
+
+def _classification_retry_extra_body(model_id: str) -> dict[str, object] | None:
+    """Reduce hidden reasoning for providers that can otherwise exhaust tool-call budget."""
+    if "gemini" not in model_id.lower():
+        return None
+    return {"reasoning": {"effort": "minimal"}}
+
+
+def _completion_finish_reason(completion: object) -> str | None:
+    choices = getattr(completion, "choices", None)
+    if not choices:
+        return None
+    return cast(str | None, getattr(choices[0], "finish_reason", None))
+
+
+def _completion_content_preview(completion: object) -> str:
+    choices = getattr(completion, "choices", None)
+    if not choices:
+        return ""
+    message = getattr(choices[0], "message", None)
+    content = getattr(message, "content", None)
+    if not isinstance(content, str):
+        return ""
+    return content[:200].replace("\n", "\\n")
+
+
+def _completion_tool_calls(completion: object) -> Any:
+    choices = getattr(completion, "choices", None)
+    if not choices:
+        raise RuntimeError("Missing classification choices")
+    message = getattr(choices[0], "message", None)
+    if message is None:
+        return None
+    return getattr(message, "tool_calls", None)
+
+
+def _create_classification_completion(
+    client: OpenAI,
+    *,
+    model_id: str,
+    messages: list[ChatCompletionMessageParam],
+    temperature: float,
+    max_tokens: int,
+    extra_body: dict[str, object] | None = None,
+) -> object:
+    kwargs: dict[str, Any] = {
+        "model": model_id,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "tools": CLASSIFICATION_TOOLS,
+        "tool_choice": CLASSIFICATION_TOOL_CHOICE,
+    }
+    if extra_body is not None:
+        kwargs["extra_body"] = extra_body
+    return client.chat.completions.create(**kwargs)
 
 def _encode_image(image_path: Path) -> ChatCompletionContentPartImageParam:
     with image_path.open("rb") as img_file:
@@ -204,20 +263,62 @@ def classify_document(
             ),
         },
     ]
-    completion = client.chat.completions.create(
-        model=model_id,
-        messages=messages,
-        temperature=temperature,
-        max_tokens=1024,
-        tools=CLASSIFICATION_TOOLS,
-        tool_choice=CLASSIFICATION_TOOL_CHOICE,
-    )
-    if not completion.choices:
-        raise RuntimeError("Missing classification choices")
+    attempts = [
+        {
+            "max_tokens": CLASSIFICATION_MAX_TOKENS,
+            "extra_body": None,
+        },
+        {
+            "max_tokens": CLASSIFICATION_RETRY_MAX_TOKENS,
+            "extra_body": _classification_retry_extra_body(model_id),
+        },
+    ]
 
-    tool_calls = completion.choices[0].message.tool_calls
+    tool_calls = None
+    last_finish_reason = None
+    for attempt_index, attempt in enumerate(attempts, start=1):
+        completion = _create_classification_completion(
+            client,
+            model_id=model_id,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=cast(int, attempt["max_tokens"]),
+            extra_body=cast(dict[str, object] | None, attempt["extra_body"]),
+        )
+        try:
+            tool_calls = _completion_tool_calls(completion)
+        except RuntimeError:
+            if attempt_index == len(attempts):
+                raise
+            logger.warning(
+                "Classification response missing choices on attempt %s/%s; retrying",
+                attempt_index,
+                len(attempts),
+            )
+            continue
+
+        if tool_calls:
+            break
+
+        last_finish_reason = _completion_finish_reason(completion)
+        if attempt_index == len(attempts):
+            break
+
+        logger.warning(
+            "Classification response missing tool call on attempt %s/%s "
+            "(finish_reason=%s, max_tokens=%s, content_preview=%r); retrying",
+            attempt_index,
+            len(attempts),
+            last_finish_reason,
+            attempt["max_tokens"],
+            _completion_content_preview(completion),
+        )
+
     if not tool_calls:
-        raise RuntimeError("Missing classification tool call")
+        raise RuntimeError(
+            "Missing classification tool call"
+            + (f" (finish_reason={last_finish_reason})" if last_finish_reason else "")
+        )
 
     tool_result_dict = _parse_classification_tool_args(tool_calls[0].function.arguments)
     exam_date = tool_result_dict.get("exam_date")

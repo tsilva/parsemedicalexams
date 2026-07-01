@@ -61,24 +61,22 @@ locale: "pt-PT"
 Run the parser:
 
 ```bash
-medicalexamsparser --profile myprofile
+parsemedicalexams --profile myprofile
 ```
 
 ## Commands
 
 ```bash
-medicalexamsparser --list-profiles              # list profiles in ~/.config/parsemedicalexams
-medicalexamsparser --profile myprofile          # process new or incomplete PDFs
-medicalexamsparser -p myprofile -d exam.pdf     # reprocess one document by filename or stem
-medicalexamsparser -p myprofile --reprocess-all # force all matching PDFs to reprocess
-medicalexamsparser -p myprofile --regenerate    # rebuild summaries from saved page markdown
-medicalexamsparser -p myprofile --resummarize   # update summaries using current prompts/models
-medicalexamsparser -p myprofile --audit-outputs # validate existing output bundles
-medicalexamsparser -p myprofile --dry-run       # preview work without LLM calls or writes
-python3 -m pytest                               # run tests
+parsemedicalexams --list-profiles              # list profiles in ~/.config/parsemedicalexams
+parsemedicalexams --profile myprofile          # process new or incomplete PDFs
+parsemedicalexams -p myprofile -d exam.pdf     # reprocess one document by filename or stem
+parsemedicalexams -p myprofile --reprocess-all # force all matching PDFs to reprocess
+parsemedicalexams -p myprofile --regenerate    # rebuild summaries from saved page markdown
+parsemedicalexams -p myprofile --resummarize   # update summaries using current prompts/models
+parsemedicalexams -p myprofile --audit-outputs # validate existing output bundles
+parsemedicalexams -p myprofile --dry-run       # preview work without LLM calls or writes
+python3 -m pytest                              # run tests
 ```
-
-The package also installs `parsemedicalexams` as an alias for the same CLI.
 
 ## Output
 

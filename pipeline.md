@@ -82,6 +82,10 @@ client.chat.completions.create(
 )
 ```
 
+If the provider returns choices without the requested tool call, the classifier retries once with
+`max_tokens=4096`. Gemini-family models also get `reasoning={"effort": "minimal"}` on the retry
+to avoid hidden reasoning exhausting the response budget before the tool call is emitted.
+
 The response is parsed into `DocumentClassification`:
 
 | Field | Description |
@@ -93,7 +97,7 @@ The response is parsed into `DocumentClassification`:
 | `physician_name` | Signing physician |
 | `department` | Department/service |
 
-Errors and missing tool calls fail the document. Non-exams return `"skipped"` and are not processed further.
+Errors and missing tool calls after retry fail the document. Non-exams return `"skipped"` and are not processed further.
 
 **Prompts:** `prompts/classification_system.md` (formatted with `{patient_context}`), `prompts/classification_user.md`
 

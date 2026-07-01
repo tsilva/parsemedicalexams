@@ -19,19 +19,19 @@ python3 -c "from parsemedicalexams import *; print('All imports OK')"
 uv tool install . --editable
 
 # Run the pipeline
-medicalexamsparser --profile tiago
+parsemedicalexams --profile tiago
 
 # Run with a specific profile
-medicalexamsparser --profile tiago
+parsemedicalexams --profile tiago
 
 # List available profiles
-medicalexamsparser --list-profiles
+parsemedicalexams --list-profiles
 
 # Regenerate summaries from existing transcription markdown
-medicalexamsparser --profile tiago --regenerate
+parsemedicalexams --profile tiago --regenerate
 
 # Reprocess a specific document (by filename or stem)
-medicalexamsparser -p tiago -d exam_2024.pdf
+parsemedicalexams -p tiago -d exam_2024.pdf
 
 ```
 
@@ -71,7 +71,7 @@ Each document produces one summary file:
 
 - **Test suite** — run `python3 -m pytest`; import verification remains a useful quick check
 - **Worktrees**: `.worktrees/` is gitignored and ready to use; no setup needed
-- **Sandbox mode**: `uv tool install . --editable` and `medicalexamsparser --list-profiles` may fail in sandboxed environments; use the import check instead
+- **Sandbox mode**: `uv tool install . --editable` and `parsemedicalexams --list-profiles` may fail in sandboxed environments; use the import check instead
 - **Dependencies already installed globally** — no reinstall needed when creating new worktrees
 - **Worktree cleanup order**: `git worktree remove` must run *before* `git branch -d` (git blocks branch deletion while a worktree has it checked out)
 
