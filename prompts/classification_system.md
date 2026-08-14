@@ -32,7 +32,11 @@ Extract the following information:
 - is_exam: true/false
 - reason: brief explanation for the decision, especially when is_exam is false (e.g., "invoice only, no clinical content")
 - exam_name_raw: The document title or exam name exactly as written (e.g., "CABELO: NUTRIENTES E METAIS TÓXICOS")
-- exam_date: The date the exam was performed or report was issued (YYYY-MM-DD)
+- exam_date: Select one canonical document date in YYYY-MM-DD using this strict priority:
+  1. Date when the clinical act was performed: specimen collection for laboratory tests; image acquisition for imaging; procedure date for endoscopy or surgery; consultation date for a completed consultation; prescription date for a prescription.
+  2. If no performed-act date is available, use the document's issue, creation, signing, or report date.
+  3. Never use the patient's birth date, an expiration/validity-end date, a historical comparison date, or a future scheduled appointment date as exam_date.
+  Examples: for blood laboratory results, use collection date instead of report/validation date; for a prescription, use its prescription/issue date instead of medication expiration dates.
 - facility_name: Healthcare facility name (e.g., "SYNLAB", "Hospital Santo António")
 - physician_name: Name of the physician/doctor who performed, interpreted, or signed the exam (look for signatures, "Dr.", "Dra.", "Médico:", "Realizado por:")
 - department: Department or service within the facility (e.g., "Serviço de Radiologia", "Cardiologia", "Gastroenterologia")

@@ -40,6 +40,10 @@ from .validation import (
 )
 
 logger = logging.getLogger(__name__)
+
+# macOS exposes cloud placeholders through ``st_flags`` even though Python's
+# ``stat`` module does not currently export the corresponding constant.
+_MACOS_DATALESS_FLAG = 0x40000000
 SKIP_MARKER_FILENAME = ".skip"
 
 
@@ -103,14 +107,10 @@ def validate_metadata_frontmatter(
     if exam_date is not None and not _is_iso_date_string(exam_date):
         issues.append("invalid_exam_date_format")
 
-    expected_doc_date = extract_doc_date_prefix(doc_stem)
-    if (
-        expected_doc_date
-        and isinstance(exam_date, str)
-        and exam_date
-        and exam_date != expected_doc_date
-    ):
-        issues.append("exam_date_mismatch_doc_prefix")
+    # A filename prefix can represent a filing, report, or scan date rather
+    # than the clinical act date selected from the document itself.  Date
+    # selection deliberately allows the semantic date to override that
+    # prefix, so equality with the filename is not a metadata invariant.
 
     category = frontmatter.get("category")
     if category is not None and category not in ALLOWED_CATEGORIES:
@@ -273,6 +273,29 @@ def count_pdf_pages(pdf_path: Path) -> int:
         logger.debug("Falling back to raster page counting for %s", pdf_path.name)
 
     return len(convert_pdf_to_images(pdf_path))
+
+
+def _is_cloud_placeholder(path: Path) -> bool:
+    """Return whether macOS reports that a cloud-backed file has no local data."""
+    return bool(getattr(path.stat(), "st_flags", 0) & _MACOS_DATALESS_FLAG)
+
+
+def validate_local_pdf(pdf_path: Path) -> None:
+    """Fail with an actionable error when a PDF is unavailable or malformed."""
+    if _is_cloud_placeholder(pdf_path):
+        raise OSError(
+            f"Cloud-backed PDF is not downloaded: {pdf_path}. "
+            "Make the file available offline and retry."
+        )
+
+    try:
+        with pdf_path.open("rb") as handle:
+            header = handle.read(1024)
+    except OSError as exc:
+        raise OSError(f"PDF is not locally readable: {pdf_path}: {exc}") from exc
+
+    if b"%PDF-" not in header:
+        raise ValueError(f"File does not contain a PDF header: {pdf_path}")
 
 
 def build_exam_frontmatter(
@@ -589,6 +612,8 @@ def is_document_processed(pdf_path: Path, output_path: Path) -> bool:
 
 def convert_pdf_to_images(pdf_path: Path) -> list[Image.Image]:
     """Convert a PDF into PIL images, using pdftoppm as a fallback."""
+    validate_local_pdf(pdf_path)
+
     try:
         from pdf2image import convert_from_path  # type: ignore[import-not-found]
 
@@ -826,16 +851,7 @@ def validate_frontmatter(
                 continue
 
             for problem in validate_metadata_frontmatter(md_path, doc_stem, frontmatter):
-                if problem == "exam_date_mismatch_doc_prefix":
-                    exam_date = frontmatter.get("exam_date")
-                    expected_doc_date = extract_doc_date_prefix(doc_stem)
-                    issues.append(
-                        "Exam date "
-                        f"{exam_date} does not match document date prefix "
-                        f"{expected_doc_date}: {md_path.name}"
-                    )
-                else:
-                    issues.append(f"{problem}: {md_path.name}")
+                issues.append(f"{problem}: {md_path.name}")
     return issues
 
 

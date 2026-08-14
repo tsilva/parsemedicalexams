@@ -143,7 +143,9 @@ def main():
         print(f"Successful: {success_count}/{len(profiles_to_run)}")
         if failed_profiles:
             print(f"Failed profiles: {', '.join(failed_profiles)}")
-            raise SystemExit(1)
+
+    if failed_profiles:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

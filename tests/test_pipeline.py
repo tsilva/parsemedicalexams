@@ -75,6 +75,7 @@ def patch_profile_loading(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline, "setup_logging", lambda *args, **kwargs: None)
     monkeypatch.setattr(pipeline, "OpenAI", lambda **kwargs: object())
     monkeypatch.setattr(pipeline, "tqdm", lambda items, **kwargs: items)
+    monkeypatch.setattr(pipeline, "validate_local_pdf", lambda _: None)
     return config
 
 
@@ -198,6 +199,70 @@ def test_select_most_frequent_date_uses_filename_date_when_visible():
             filename_date="2026-05-07",
         )
         == "2026-05-07"
+    )
+
+
+def test_select_most_frequent_date_prefers_act_date_over_repeated_expiration():
+    exam = pipeline.ExamRecord(
+        exam_name_raw="Guia de Tratamento para o Utente",
+        exam_date="2026-07-14",
+        transcription=(
+            "Data da prescrição: 2026-07-14\n"
+            "Validade: 2027-07-15\n"
+            "Medicamento 1 válido até 2027-07-15\n"
+            "Medicamento 2 válido até 2027-07-15"
+        ),
+        page_number=1,
+        source_file="receita.pdf",
+    )
+
+    assert (
+        pipeline.select_most_frequent_date(
+            [exam],
+            preferred_date="2026-07-14",
+        )
+        == "2026-07-14"
+    )
+
+
+def test_select_most_frequent_date_prefers_act_date_over_visible_filename_date():
+    exam = pipeline.ExamRecord(
+        exam_name_raw="Análises clínicas",
+        exam_date="2026-07-12",
+        transcription=(
+            "Colheita: 2026-07-12\n"
+            "Relatório emitido: 2026-07-14"
+        ),
+        page_number=1,
+        source_file="2026-07-14 - analises.pdf",
+    )
+
+    assert (
+        pipeline.select_most_frequent_date(
+            [exam],
+            filename_date="2026-07-14",
+            preferred_date="2026-07-12",
+        )
+        == "2026-07-12"
+    )
+
+
+def test_select_most_frequent_date_never_falls_back_to_excluded_birth_date():
+    exam = pipeline.ExamRecord(
+        exam_name_raw="Documento clínico",
+        exam_date="1952-08-07",
+        transcription="Data de nascimento: 1952-08-07",
+        page_number=1,
+        source_file="documento.pdf",
+    )
+
+    assert (
+        pipeline.select_most_frequent_date(
+            [exam],
+            exclude_dates={"1952-08-07"},
+            preferred_date="1952-08-07",
+        )
+        is None
     )
 
 
@@ -388,6 +453,49 @@ def test_run_profile_normal_processes_and_validates_outputs(tmp_path, monkeypatc
 
     assert pipeline.run_profile("test", make_args()) is True
     assert processed == [pdf_path]
+
+
+def test_run_profile_reports_unavailable_sources_without_validating_them(
+    tmp_path, monkeypatch
+):
+    config = patch_profile_loading(monkeypatch, tmp_path)
+    available_pdf = config.input_path / "available.pdf"
+    unavailable_pdf = config.input_path / "cloud.pdf"
+    available_pdf.write_bytes(b"pdf")
+    unavailable_pdf.write_bytes(b"pdf")
+    processed = []
+    validation_calls = []
+
+    monkeypatch.setattr(
+        pipeline,
+        "discover_pdf_files",
+        lambda *args, **kwargs: [available_pdf, unavailable_pdf],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "select_documents_to_process",
+        lambda *args, **kwargs: ([available_pdf, unavailable_pdf], 0),
+    )
+
+    def validate_source(pdf_path):
+        if pdf_path == unavailable_pdf:
+            raise OSError("Cloud-backed PDF is not downloaded")
+
+    monkeypatch.setattr(pipeline, "validate_local_pdf", validate_source)
+    monkeypatch.setattr(
+        pipeline,
+        "process_single_pdf",
+        lambda pdf_path, *args, **kwargs: processed.append(pdf_path) or 1,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "log_output_assertions_report",
+        lambda pdf_files, *args, **kwargs: validation_calls.append(pdf_files) or True,
+    )
+
+    assert pipeline.run_profile("test", make_args()) is False
+    assert processed == [available_pdf]
+    assert validation_calls == [[available_pdf]]
 
 
 def test_process_single_pdf_skips_non_exam_without_reason_attribute(tmp_path, monkeypatch):

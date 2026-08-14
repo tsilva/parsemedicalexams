@@ -18,7 +18,7 @@ APP_NAME = "parsemedicalexams"
 DEFAULT_CONFIG_DIR = Path.home() / ".config" / APP_NAME
 LEGACY_CONFIG_DIR = Path.home() / ".config" / "medicalexamsparser"
 PROFILE_EXTENSIONS = (".yaml", ".yml", ".json")
-DEFAULT_MODEL_ID = "google/gemini-2.5-flash"
+DEFAULT_MODEL_ID = "google/gemini-3.7-flash"
 DEFAULT_VALIDATION_MODEL_ID = "anthropic/claude-haiku-4.5"
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_N_EXTRACTIONS = 1
@@ -100,7 +100,7 @@ def migrate_env_file(*source_dirs: Path) -> Path | None:
     """Move a real .env file into the global config directory if needed."""
     env_path = get_env_path()
     if env_path.exists():
-        return env_path
+        return None
 
     for source_dir in source_dirs:
         source_path = source_dir / ENV_FILENAME

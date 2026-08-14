@@ -127,7 +127,7 @@ def test_classify_document_retries_missing_tool_call_for_gemini(tmp_path, caplog
     with caplog.at_level("WARNING"):
         classification = classify_document(
             [image_path],
-            "google/gemini-3.5-flash",
+            "google/gemini-3.7-flash",
             client,
         )
 
@@ -154,7 +154,7 @@ def test_classify_document_reports_finish_reason_after_retry_failure(tmp_path):
     with pytest.raises(RuntimeError, match="finish_reason=length"):
         classify_document(
             [image_path],
-            "google/gemini-3.5-flash",
+            "google/gemini-3.7-flash",
             client,
         )
 

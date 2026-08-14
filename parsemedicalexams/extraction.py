@@ -48,7 +48,13 @@ class DocumentClassification(BaseModel):
     )
     exam_date: str | None = Field(
         default=None,
-        description="Exam date in YYYY-MM-DD format",
+        description=(
+            "Date of the performed clinical act in YYYY-MM-DD format. Prefer the "
+            "specimen collection, imaging acquisition, procedure, consultation, or "
+            "prescription date over report/issue dates. If no performed-act date is "
+            "available, use the document issue, creation, signing, or report date. "
+            "Never use birth, expiration, validity-end, or future scheduling dates."
+        ),
     )
     facility_name: str | None = Field(
         default=None,
