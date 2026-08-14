@@ -39,9 +39,9 @@ Edit `~/.config/parsemedicalexams/.env` with your OpenRouter key and model IDs:
 
 ```dotenv
 OPENROUTER_API_KEY=your_api_key
-EXTRACT_MODEL_ID=google/gemini-2.5-flash
-SUMMARIZE_MODEL_ID=google/gemini-2.5-flash
-SELF_CONSISTENCY_MODEL_ID=google/gemini-2.5-flash
+EXTRACT_MODEL_ID=google/gemini-3.7-flash
+SUMMARIZE_MODEL_ID=google/gemini-3.7-flash
+SELF_CONSISTENCY_MODEL_ID=google/gemini-3.7-flash
 VALIDATION_MODEL_ID=anthropic/claude-haiku-4.5
 ```
 

@@ -15,6 +15,7 @@ from parsemedicalexams.document_io import (
     purge_orphan_output_dirs,
     save_transcription_file,
     validate_frontmatter,
+    validate_local_pdf,
     validate_orphan_output_dirs,
     write_markdown_with_frontmatter,
 )
@@ -175,6 +176,26 @@ def test_copy_source_pdf_propagates_permission_error(tmp_path, monkeypatch):
         copy_source_pdf(source_pdf, doc_dir)
 
 
+def test_validate_local_pdf_rejects_cloud_placeholder(tmp_path, monkeypatch):
+    source_pdf = tmp_path / "exam.pdf"
+    source_pdf.write_bytes(b"%PDF-1.7\n")
+    monkeypatch.setattr(
+        "parsemedicalexams.document_io._is_cloud_placeholder",
+        lambda _: True,
+    )
+
+    with pytest.raises(OSError, match="Make the file available offline"):
+        validate_local_pdf(source_pdf)
+
+
+def test_validate_local_pdf_rejects_non_pdf_content(tmp_path):
+    source_pdf = tmp_path / "exam.pdf"
+    source_pdf.write_bytes(b"not actually a PDF")
+
+    with pytest.raises(ValueError, match="does not contain a PDF header"):
+        validate_local_pdf(source_pdf)
+
+
 def test_get_document_output_issue_rejects_transcription_without_prompt_variant(
     tmp_path, monkeypatch
 ):
@@ -223,7 +244,9 @@ def test_extract_doc_date_prefix_reads_prefix():
     assert extract_doc_date_prefix("questionario noite") is None
 
 
-def test_get_document_output_issue_detects_exam_date_mismatch_doc_prefix(tmp_path, monkeypatch):
+def test_get_document_output_issue_accepts_semantic_date_different_from_prefix(
+    tmp_path, monkeypatch
+):
     source_pdf = tmp_path / "2025-08-22 - exam.pdf"
     source_pdf.write_bytes(b"source")
     monkeypatch.setattr("parsemedicalexams.document_io.count_pdf_pages", lambda _: 1)
@@ -244,21 +267,19 @@ def test_get_document_output_issue_detects_exam_date_mismatch_doc_prefix(tmp_pat
     save_transcription_file([exam], doc_dir, source_pdf.stem, 1)
     (doc_dir / f"{source_pdf.stem}.summary.md").write_text(
         (
-            "---\n"
-            "exam_date: '2025-08-22'\n"
-            "category: other\n"
-            "title: Summary\n"
-            "---\n\n"
-            "Long enough summary body.\n"
+                "---\n"
+                "exam_date: '2025-08-22'\n"
+                "exam_name_raw: Summary\n"
+                "category: other\n"
+                "title: Summary\n"
+                "---\n\n"
+                "Long enough summary body with clinically meaningful details "
+                "to satisfy the summary output validator.\n"
         ),
         encoding="utf-8",
     )
 
-    assert (
-        get_document_output_issue(source_pdf, output_path)
-        == "invalid transcription output in "
-        f"{source_pdf.stem}.001.md: exam_date_mismatch_doc_prefix"
-    )
+    assert get_document_output_issue(source_pdf, output_path) is None
 
 
 def test_get_document_output_issue_accepts_skip_marker(tmp_path):
@@ -399,7 +420,7 @@ def test_collect_output_assertions_skips_frontmatter_checks_for_orphans(tmp_path
     assert not orphan_dir.exists()
 
 
-def test_validate_frontmatter_detects_exam_date_mismatch_doc_prefix(tmp_path):
+def test_validate_frontmatter_accepts_semantic_date_different_from_prefix(tmp_path):
     output_path = tmp_path / "out"
     doc_stem = "2025-08-22 - exam"
     doc_dir = output_path / doc_stem
@@ -416,10 +437,7 @@ def test_validate_frontmatter_detects_exam_date_mismatch_doc_prefix(tmp_path):
 
     issues = validate_frontmatter(output_path)
 
-    assert (
-        f"Exam date 1984-11-16 does not match document date prefix 2025-08-22: {doc_stem}.001.md"
-        in issues
-    )
+    assert issues == []
 
 
 def test_validate_frontmatter_detects_page_metadata_invariants(tmp_path):

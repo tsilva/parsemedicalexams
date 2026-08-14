@@ -29,6 +29,7 @@ from .document_io import (
     remove_skip_marker,
     save_document_summary,
     save_transcription_file,
+    validate_local_pdf,
     write_skip_marker,
 )
 from .extraction import (
@@ -388,8 +389,9 @@ def select_most_frequent_date(
     exams: list[ExamRecord],
     exclude_dates: set[str] | None = None,
     filename_date: str | None = None,
+    preferred_date: str | None = None,
 ) -> str | None:
-    """Select the most frequent exam date across all pages using frequency-based voting."""
+    """Select the canonical document date, using frequency only as a fallback."""
     from collections import Counter
 
     all_dates = []
@@ -405,7 +407,11 @@ def select_most_frequent_date(
                 all_dates.extend(page_dates)
 
     if not all_dates:
-        all_dates = [exam.exam_date for exam in exams if exam.exam_date]
+        all_dates = [
+            exam.exam_date
+            for exam in exams
+            if exam.exam_date and exam.exam_date not in excluded_dates
+        ]
 
     if not all_dates:
         return None
@@ -422,13 +428,23 @@ def select_most_frequent_date(
             len(all_dates),
         )
 
+    if preferred_date and preferred_date in date_counts:
+        if preferred_date != most_common_date:
+            logger.info(
+                "Semantic date selection: %s overrides frequency winner %s (%s occurrences)",
+                preferred_date,
+                most_common_date,
+                count,
+            )
+        return preferred_date
+
     if (
         filename_date
         and most_common_date != filename_date
         and filename_date in date_counts
     ):
         logger.info(
-            "Filename date override: %s (found in %s pages) overrides "
+            "Filename date fallback: %s (found in %s pages) overrides "
             "frequency winner %s (%s pages)",
             filename_date,
             date_counts[filename_date],
@@ -786,9 +802,10 @@ def process_single_pdf(
             all_exams,
             exclude_dates=exclude_dates,
             filename_date=filename_date,
+            preferred_date=classification.exam_date,
         )
         if corrected_date:
-            logger.debug("Selected document date by frequency: %s", corrected_date)
+            logger.debug("Selected canonical document date: %s", corrected_date)
             for exam in all_exams:
                 exam.exam_date = corrected_date
 
@@ -1053,10 +1070,38 @@ def run_profile(profile_name: str, args: Namespace) -> bool:
             already_processed,
         )
 
+    source_failures: list[tuple[Path, str]] = []
+    available_to_process: list[Path] = []
+    for pdf_path in to_process:
+        try:
+            validate_local_pdf(pdf_path)
+        except (OSError, ValueError) as exc:
+            source_failures.append((pdf_path, str(exc)))
+        else:
+            available_to_process.append(pdf_path)
+
+    if source_failures:
+        logger.error(
+            "%s source PDF(s) are unavailable or invalid:",
+            len(source_failures),
+        )
+        displayed_failures = source_failures[:10]
+        for pdf_path, issue in displayed_failures:
+            logger.error("  %s: %s", pdf_path.name, issue)
+        undisplayed_count = len(source_failures) - len(displayed_failures)
+        if undisplayed_count:
+            logger.error(
+                "  ... and %s more. Make the profile input directory available "
+                "offline and retry.",
+                undisplayed_count,
+            )
+
+    to_process = available_to_process
     total_pages = 0
     skipped_documents: list[str] = []
     processed_documents: list[Path] = []
-    failed_count = 0
+    failed_documents = {pdf_path for pdf_path, _ in source_failures}
+    failed_count = len(failed_documents)
 
     for pdf_path in tqdm(to_process, desc="Processing PDFs"):
         try:
@@ -1072,6 +1117,7 @@ def run_profile(profile_name: str, args: Namespace) -> bool:
         except Exception:
             logger.exception("Failed to process %s", pdf_path.name)
             failed_count += 1
+            failed_documents.add(pdf_path)
             continue
 
         if result == "skipped":
@@ -1081,6 +1127,7 @@ def run_profile(profile_name: str, args: Namespace) -> bool:
             processed_documents.append(pdf_path)
         else:
             failed_count += 1
+            failed_documents.add(pdf_path)
 
     if config.dry_run:
         logger.info(
@@ -1138,9 +1185,17 @@ def run_profile(profile_name: str, args: Namespace) -> bool:
         failed_count=failed_count,
     )
 
-    return log_output_assertions_report(
-        pdf_files,
+    validation_pdfs = [
+        pdf_path for pdf_path in pdf_files if pdf_path not in failed_documents
+    ]
+    outputs_are_valid = log_output_assertions_report(
+        validation_pdfs,
         config.output_path,
         config.input_path,
-        label="Post-extraction validation",
+        label=(
+            "Post-extraction validation (available sources)"
+            if failed_documents
+            else "Post-extraction validation"
+        ),
     )
+    return outputs_are_valid and not failed_documents

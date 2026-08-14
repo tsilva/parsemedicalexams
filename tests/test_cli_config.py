@@ -1,5 +1,8 @@
+from types import SimpleNamespace
+
 import pytest
 
+from parsemedicalexams import cli
 from parsemedicalexams.cli import parse_args
 from parsemedicalexams.config import (
     DEFAULT_MODEL_ID,
@@ -7,6 +10,7 @@ from parsemedicalexams.config import (
     DEFAULT_SUMMARIZE_MAX_INPUT_TOKENS,
     ExtractionConfig,
     ProfileConfig,
+    migrate_env_file,
 )
 
 
@@ -72,3 +76,37 @@ def test_extraction_config_uses_default_model_when_legacy_profile_aliases_remove
     extraction_config = ExtractionConfig.from_profile(profile)
 
     assert extraction_config.extract_model_id == DEFAULT_MODEL_ID
+
+
+def test_main_exits_nonzero_when_single_profile_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        cli,
+        "parse_args",
+        lambda: SimpleNamespace(profile="ligia", list_profiles=False),
+    )
+    monkeypatch.setattr(cli, "ensure_config_dir", lambda: tmp_path)
+    monkeypatch.setattr(cli, "migrate_profiles", lambda *_: [])
+    monkeypatch.setattr(cli, "migrate_env_file", lambda *_: None)
+    monkeypatch.setattr(cli, "sync_example_file", lambda *_: None)
+    monkeypatch.setattr(cli, "run_profile", lambda *_: False)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main()
+
+    assert exc_info.value.code == 1
+
+
+def test_migrate_env_file_does_not_report_existing_destination_as_moved(
+    tmp_path, monkeypatch
+):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / ".env").write_text("EXISTING=1\n", encoding="utf-8")
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    source_env = source_dir / ".env"
+    source_env.write_text("SOURCE=1\n", encoding="utf-8")
+    monkeypatch.setattr("parsemedicalexams.config.DEFAULT_CONFIG_DIR", config_dir)
+
+    assert migrate_env_file(source_dir) is None
+    assert source_env.exists()
