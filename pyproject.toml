@@ -3,7 +3,7 @@ name = "parsemedicalexams"
 dynamic = ["version"]
 description = "Extract and summarize medical exam reports (X-rays, MRIs, ultrasounds, etc.) with AI precision"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "MIT"
 authors = [
     {name = "Tiago Silva", email = "tiago@tsilva.com"}
@@ -13,7 +13,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Healthcare Industry",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -21,9 +20,9 @@ classifiers = [
 
 dependencies = [
     "openai",
-    "pillow",
+    "pillow>=12.3.0",
     "pdf2image",
-    "python-dotenv",
+    "python-dotenv>=1.2.2",
     "pydantic",
     "pyyaml",
     "tqdm",
@@ -32,7 +31,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
+    "pip-audit>=2.9.0",
+    "pytest>=9.0.3",
     "pytest-cov",
     "ruff",
     "mypy",
@@ -88,8 +88,10 @@ exclude = [
 select = ["E", "F", "I"]
 
 [tool.uv]
+required-version = "==0.11.13"
 exclude-newer = "7 days"
 constraint-dependencies = [
+  "pygments>=2.20.0",
   "mistralai!=2.4.6",
   "guardrails-ai!=0.10.1",
 ]
