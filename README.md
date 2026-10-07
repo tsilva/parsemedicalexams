@@ -1,10 +1,10 @@
-<div align="center">
+<p align="center">
   <img src="./logo.png" alt="parsemedicalexams" width="420" />
-
-  # parsemedicalexams
-
-  **🏥 Extract and summarize medical exam reports from PDFs using Vision AI 📄**
-</div>
+  <br />
+  <!-- repo-tagline:start -->
+  <strong>🏥 Extract and summarize medical exam PDFs with vision AI 📄</strong>
+  <!-- repo-tagline:end -->
+</p>
 
 parsemedicalexams is a Python CLI for turning PDF medical exam reports into structured markdown. It converts PDF pages to images, uses Vision LLMs through OpenRouter to transcribe and classify exams, then writes per-page markdown plus a document-level clinical summary.
 
