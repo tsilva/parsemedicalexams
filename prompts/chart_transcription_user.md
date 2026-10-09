@@ -1,7 +1,7 @@
 Extract clinically meaningful data from this `{chart_type}` page.
 
 Use these rules:
-- If this is an audiogram, output exactly:
+- If this is an audiogram, begin with this required structure:
   [AUDIOGRAM]
   Right ear thresholds (dB HL):
   - 125 Hz: value
@@ -24,6 +24,7 @@ Use these rules:
   - Left ear SRT: value
   - Right ear discrimination: value
   - Left ear discrimination: value
+- After the required audiogram structure, preserve every additional uniquely readable curve and speech-response point in separate labelled tables. Keep circle/cross air-conduction thresholds distinct from bracket-symbol points; retain symbols if the source has no legend. Include each readable frequency and level for additional curves, and every readable speech presentation level in dB HL with its response percentage. Do not silently discard these measurements because they are absent from the required scaffold.
 - If this is a tympanometry page, output exactly:
   [TYMPANOMETRY]
   Right ear:
