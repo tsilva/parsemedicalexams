@@ -9,7 +9,12 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from .models import ExamRecord
 from .utils import load_prompt, require_completion_text
-from .validation import first_blocking_issue, validate_page_output, validate_summary_output, validate_source_units
+from .validation import (
+    first_blocking_issue,
+    validate_page_output,
+    validate_source_units,
+    validate_summary_output,
+)
 
 logger = logging.getLogger(__name__)
 

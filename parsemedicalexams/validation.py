@@ -17,7 +17,8 @@ HARD_FAILURE_PATTERNS = [
 MODEL_NARRATION_PATTERNS = [
     re.compile(
         r"\b(?:I(?:'m| am) not going to|I (?:cannot|can't|will not|won't))"
-        r"\s+(?:transcribe|process)\s+(?:this|the|private medical)", re.IGNORECASE,
+        r"\s+(?:transcribe|process)\s+(?:this|the|private medical)",
+        re.IGNORECASE,
     ),
     re.compile(r"\bNot processing private medical documents\b", re.IGNORECASE),
     re.compile(
@@ -193,7 +194,11 @@ def mass_units(text: str) -> set[tuple[str, str]]:
 
 
 def validate_source_units(
-    source_text: str, output: str, *, scope: str = "page", page: int | None = None,
+    source_text: str,
+    output: str,
+    *,
+    scope: str = "page",
+    page: int | None = None,
 ) -> list[OutputIssue]:
     """Block unsupported scale changes when source text supplies the same denominator.
 
@@ -202,12 +207,16 @@ def validate_source_units(
     """
     source_units = mass_units(source_text)
     unsupported = {
-        unit for unit in mass_units(output) - source_units
+        unit
+        for unit in mass_units(output) - source_units
         if any(printed[1] == unit[1] for printed in source_units)
     }
     return [
         OutputIssue(
-            kind="source_unit_mismatch", severity="blocking", scope=scope, page=page,
+            kind="source_unit_mismatch",
+            severity="blocking",
+            scope=scope,
+            page=page,
             reason="Output mass-concentration scale is absent from comparable printed source units",
             snippet=f"{prefix}/{denominator}",
         )
@@ -359,8 +368,7 @@ def validate_page_output(
                 scope="page",
                 page=page,
                 reason=(
-                    "Page output only contains low-signal OCR fragments "
-                    "and illegible placeholders"
+                    "Page output only contains low-signal OCR fragments and illegible placeholders"
                 ),
                 snippet=body[:160],
             )

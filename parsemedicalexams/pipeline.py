@@ -53,8 +53,8 @@ from .validation import (
     determine_page_strategy,
     first_blocking_issue,
     validate_page_output,
-    validate_summary_output,
     validate_source_units,
+    validate_summary_output,
 )
 
 logger = logging.getLogger(__name__)

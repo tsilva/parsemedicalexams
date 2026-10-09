@@ -10,8 +10,8 @@ from parsemedicalexams.pipeline import discover_pdf_files
 from parsemedicalexams.validation import (
     first_blocking_issue,
     validate_page_output,
-    validate_summary_output,
     validate_source_units,
+    validate_summary_output,
 )
 
 
@@ -109,11 +109,18 @@ def test_cached_outputs_reject_source_mass_scale_change(tmp_path, monkeypatch, b
     folder.mkdir(parents=True)
     document_io.copy_source_pdf(source, folder)
     Image.new("RGB", (10, 10)).save(folder / "synthetic.001.jpg")
-    text = "Mineral A: 120 mcg/g (ppm). The source reports the concentration in micrograms per gram."
+    text = (
+        "Mineral A: 120 mcg/g (ppm). The source reports the concentration in micrograms per gram."
+    )
     exam = ExamRecord(
-        exam_name_raw="Synthetic mineral panel", exam_name_standardized="Synthetic mineral panel",
-        exam_date=None, exam_type="other", transcription=text, page_number=1,
-        source_file=source.name, prompt_variant="transcription_system",
+        exam_name_raw="Synthetic mineral panel",
+        exam_name_standardized="Synthetic mineral panel",
+        exam_date=None,
+        exam_type="other",
+        transcription=text,
+        page_number=1,
+        source_file=source.name,
+        prompt_variant="transcription_system",
     )
     if bad_stage == "page":
         exam.transcription = text.replace("mcg/g", "mg/g")
@@ -126,37 +133,73 @@ def test_cached_outputs_reject_source_mass_scale_change(tmp_path, monkeypatch, b
     assert ("summary" in issue) == (bad_stage == "summary")
 
 
-def test_unknown_clinical_date_survives_scan_filename_birth_and_validity_dates(tmp_path, monkeypatch):
+def test_unknown_clinical_date_survives_scan_filename_birth_and_validity_dates(
+    tmp_path, monkeypatch
+):
     import parsemedicalexams.pipeline as pipeline
 
     pdf = tmp_path / "Scanned_20260102.pdf"
     pdf.write_bytes(b"synthetic PDF")
     image = tmp_path / "synthetic.jpg"
     captured = []
-    monkeypatch.setattr(pipeline, "preprocess_pdf_images_to_temp", lambda *args: (
-        SimpleNamespace(cleanup=lambda: None), [image],
-    ))
-    monkeypatch.setattr(pipeline, "classify_document", lambda *args, **kwargs: SimpleNamespace(
-        is_exam=True, exam_name_raw="Undated referral", exam_date=None,
-        facility_name=None, physician_name=None, department=None,
-    ))
+    monkeypatch.setattr(
+        pipeline,
+        "preprocess_pdf_images_to_temp",
+        lambda *args: (
+            SimpleNamespace(cleanup=lambda: None),
+            [image],
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "classify_document",
+        lambda *args, **kwargs: SimpleNamespace(
+            is_exam=True,
+            exam_name_raw="Undated referral",
+            exam_date=None,
+            facility_name=None,
+            physician_name=None,
+            department=None,
+        ),
+    )
     monkeypatch.setattr(pipeline, "copy_source_pdf", lambda *args: None)
     monkeypatch.setattr(pipeline, "persist_temp_images", lambda *args: [image])
     monkeypatch.setattr(pipeline, "extract_pdf_page_text", lambda *args: "")
-    monkeypatch.setattr(pipeline, "transcribe_with_retry", lambda **kwargs: (
-        "Undated referral. Birth date: 1960-01-01. Valid until: 2027-02-02. "
-        "A consultation was requested; completion is not recorded.", "synthetic", 1,
-    ))
-    monkeypatch.setattr(pipeline, "standardize_exam_types", lambda *args: {
-        "Undated referral": ("appointment", "Undated referral"),
-    })
-    monkeypatch.setattr(pipeline, "save_transcription_file", lambda exams, *args: captured.extend(exams))
-    monkeypatch.setattr(pipeline, "summarize_document", lambda *args, **kwargs:
-        "An undated referral requests a consultation. Completion is not recorded.")
+    monkeypatch.setattr(
+        pipeline,
+        "transcribe_with_retry",
+        lambda **kwargs: (
+            "Undated referral. Birth date: 1960-01-01. Valid until: 2027-02-02. "
+            "A consultation was requested; completion is not recorded.",
+            "synthetic",
+            1,
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "standardize_exam_types",
+        lambda *args: {
+            "Undated referral": ("appointment", "Undated referral"),
+        },
+    )
+    monkeypatch.setattr(
+        pipeline, "save_transcription_file", lambda exams, *args: captured.extend(exams)
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "summarize_document",
+        lambda *args, **kwargs: (
+            "An undated referral requests a consultation. Completion is not recorded."
+        ),
+    )
     monkeypatch.setattr(pipeline, "save_document_summary", lambda *args: None)
     config = SimpleNamespace(
-        dry_run=False, extract_model_id="synthetic", n_extractions=1, max_workers=1,
-        validation_model_id="synthetic", summarize_model_id="synthetic",
+        dry_run=False,
+        extract_model_id="synthetic",
+        n_extractions=1,
+        max_workers=1,
+        validation_model_id="synthetic",
+        summarize_model_id="synthetic",
         summarize_max_input_tokens=1000,
     )
     assert pipeline.process_single_pdf(pdf, tmp_path / "out", config, object()) == 1

@@ -35,10 +35,10 @@ from .utils import preprocess_page_image
 from .validation import (
     determine_page_strategy,
     first_blocking_issue,
-    validate_page_output,
-    validate_summary_output,
     mass_units,
+    validate_page_output,
     validate_source_units,
+    validate_summary_output,
 )
 
 logger = logging.getLogger(__name__)
@@ -634,7 +634,9 @@ def get_document_output_issue(pdf_path: Path, output_path: Path) -> str | None:
     if summary_problems:
         return f"invalid summary output: {', '.join(summary_problems)}"
     _, summary_body = parse_frontmatter(summary_path.read_text(encoding="utf-8"))
-    if first_blocking_issue(validate_source_units("\n".join(page_bodies), summary_body, scope="summary")):
+    if first_blocking_issue(
+        validate_source_units("\n".join(page_bodies), summary_body, scope="summary")
+    ):
         return "source unit mismatch in summary"
 
     return None
