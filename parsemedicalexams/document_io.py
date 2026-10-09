@@ -37,6 +37,8 @@ from .validation import (
     first_blocking_issue,
     validate_page_output,
     validate_summary_output,
+    mass_units,
+    validate_source_units,
 )
 
 logger = logging.getLogger(__name__)
@@ -615,14 +617,25 @@ def get_document_output_issue(pdf_path: Path, output_path: Path) -> str | None:
     if not summary_path.exists():
         return "missing document summary"
 
+    page_bodies = []
     for md_path in markdown_files:
         problems = _validate_existing_transcription_file(md_path)
         if problems:
             return f"invalid transcription output in {md_path.name}: {', '.join(problems)}"
+        metadata, body = parse_frontmatter(md_path.read_text(encoding="utf-8"))
+        page_bodies.append(body)
+        if mass_units(body):
+            page = int(metadata.get("page") or md_path.stem.rsplit(".", 1)[-1])
+            source_text = extract_pdf_page_text(copied_pdf, page)
+            if first_blocking_issue(validate_source_units(source_text, body, page=page)):
+                return f"source unit mismatch in {md_path.name}"
 
     summary_problems = _validate_existing_summary_file(summary_path)
     if summary_problems:
         return f"invalid summary output: {', '.join(summary_problems)}"
+    _, summary_body = parse_frontmatter(summary_path.read_text(encoding="utf-8"))
+    if first_blocking_issue(validate_source_units("\n".join(page_bodies), summary_body, scope="summary")):
+        return "source unit mismatch in summary"
 
     return None
 

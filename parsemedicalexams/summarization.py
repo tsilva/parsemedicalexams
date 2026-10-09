@@ -9,7 +9,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from .models import ExamRecord
 from .utils import load_prompt, require_completion_text
-from .validation import first_blocking_issue, validate_page_output, validate_summary_output
+from .validation import first_blocking_issue, validate_page_output, validate_summary_output, validate_source_units
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +107,10 @@ def summarize_document(
             client,
         )
         issues = validate_summary_output(running_summary)
+        issues.extend(validate_source_units(
+            "\n".join(exam.transcription for exam in exams_with_content),
+            running_summary, scope="summary",
+        ))
         blocking_issue = first_blocking_issue(issues)
         if not blocking_issue:
             return running_summary

@@ -54,6 +54,7 @@ from .validation import (
     first_blocking_issue,
     validate_page_output,
     validate_summary_output,
+    validate_source_units,
 )
 
 logger = logging.getLogger(__name__)
@@ -111,8 +112,9 @@ def discover_pdf_files(
     return sorted(
         [
             pdf_path
-            for pdf_path in input_path.glob("**/*.pdf")
-            if pdf_pattern.match(pdf_path.name)
+            for pdf_path in input_path.rglob("*")
+            if pdf_path.is_file() and pdf_path.suffix.casefold() == ".pdf"
+            and pdf_pattern.match(pdf_path.name)
         ]
     )
 
@@ -600,7 +602,8 @@ def process_single_pdf(
         image_paths = existing_images or persist_temp_images(temp_image_paths, doc_output_dir)
 
         exam_name = classification.exam_name_raw or doc_stem
-        exam_date = classification.exam_date or extract_date_from_filename(pdf_path.name)
+        # A filename can date a scan/export rather than the clinical act.
+        exam_date = classification.exam_date
         facility_name = classification.facility_name
 
         def process_page(page_num: int, image_path: Path) -> ExamRecord:
@@ -746,6 +749,7 @@ def process_single_pdf(
                 chart_type=chart_type,
                 page=page_num,
             )
+            issues.extend(validate_source_units(embedded_text, transcription, page=page_num))
             blocking_issue = first_blocking_issue(issues)
 
             if blocking_issue and _should_mark_unsupported_visual(
@@ -815,7 +819,7 @@ def process_single_pdf(
         if temp_dir is not None:
             temp_dir.cleanup()
 
-    if all_exams:
+    if all_exams and classification.exam_date:
         exclude_dates = {birth_date} if birth_date else None
         filename_date = extract_date_from_filename(pdf_path.name)
         corrected_date = select_most_frequent_date(

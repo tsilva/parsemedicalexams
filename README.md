@@ -113,4 +113,8 @@ Page markdown files contain YAML frontmatter for fields such as `exam_date`, `ti
 
 ## Extraction fidelity
 
+New extractions retain an explicitly unknown clinical date instead of borrowing a filename or scanner timestamp. Date-frequency reconciliation runs only when classification found an actual source date.
+
+Automatic discovery includes nested files with `.pdf` or `.PDF` extensions. When embedded source text supplies comparable mass-concentration units, page/cache checks reject unsupported scale changes such as mcg/g to mg/g. Summary generation applies the same guard against its source transcriptions. Scanned or incomplete source text still requires source review. Audiogram speech thresholds use the 50% response point in dB HL; missing plotted measurements are distinct from unreadable points and measured zeroes.
+
 Filename filters are case-insensitive. An explicitly selected document can be located recursively even when its name does not match the filter. Undated documents retain `exam_date: null`; dates are not invented to satisfy filename conventions. Reused images must decode successfully and copied PDFs must match the current source. API-error text, transcription refusals and unrelated conversation text are blocking failures. An unavailable or ambiguous refusal check cannot accept a transcription. Summary regeneration validates every input page before requesting a summary, retains the previous summary until a replacement passes validation, and writes Markdown atomically. Orders and referrals must retain their planned/unknown completion status.

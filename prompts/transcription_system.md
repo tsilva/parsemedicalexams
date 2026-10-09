@@ -22,6 +22,7 @@ VERBATIM TRANSCRIPTION RULES:
 
 FOR TABLES AND DATA:
 - Preserve column alignment as best as possible
+- Copy mass-unit prefixes exactly: mcg/µg and mg differ by a factor of 1000. Preserve the printed unit on every row; ppm alongside mcg/g does not authorize changing it to mg/g.
 - Keep values aligned with their headers
 - Maintain the visual structure of the data
 

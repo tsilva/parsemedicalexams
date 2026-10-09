@@ -40,6 +40,8 @@ Use these rules:
   - Gradient: value
   Audiologist: value
 - Include only frequencies or scores that are actually readable
+- For speech curves, SRT is the horizontal dB HL value at the 50% response point. A 0% response point or an axis origin is not SRT. Use `unreadable` if no unambiguous 50% point or explicit threshold label is visible; do not interpolate. Keep percentage response separate from presentation level in dB HL.
+- A frequency with no plotted measurement is `not measured`, rather than a measured zero or an illegible plotted point. Use `unreadable` only for a visible point whose value cannot be resolved.
 - Use `unreadable` for any requested field that cannot be read
 - If the page has no uniquely readable discrete plotted values beyond chart scaffold labels, output exactly:
   [NON_DISCRETE_VISUAL_CHART]

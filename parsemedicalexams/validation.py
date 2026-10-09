@@ -181,6 +181,40 @@ def first_blocking_issue(issues: list[OutputIssue]) -> OutputIssue | None:
     return next((issue for issue in issues if issue.severity == "blocking"), None)
 
 
+def mass_units(text: str) -> set[tuple[str, str]]:
+    """Collect printed mass-concentration units without converting quantities."""
+    return {
+        (prefix.replace("µ", "u").replace("μ", "u").replace("ug", "mcg"), denominator.lower())
+        for prefix, denominator in re.findall(
+            r"(?<![A-Za-zµμ])(mcg|mg|ug|µg|μg|ng|pg|g)\s*/\s*(kg|g|[md]?L)(?![A-Za-z])",
+            text,
+        )
+    }
+
+
+def validate_source_units(
+    source_text: str, output: str, *, scope: str = "page", page: int | None = None,
+) -> list[OutputIssue]:
+    """Block unsupported scale changes when source text supplies the same denominator.
+
+    This is a conservative guard, not OCR or a substitute for page review. An
+    empty or partial source with no comparable units cannot establish a mismatch.
+    """
+    source_units = mass_units(source_text)
+    unsupported = {
+        unit for unit in mass_units(output) - source_units
+        if any(printed[1] == unit[1] for printed in source_units)
+    }
+    return [
+        OutputIssue(
+            kind="source_unit_mismatch", severity="blocking", scope=scope, page=page,
+            reason="Output mass-concentration scale is absent from comparable printed source units",
+            snippet=f"{prefix}/{denominator}",
+        )
+        for prefix, denominator in sorted(unsupported)
+    ]
+
+
 def _match_issues(
     text: str,
     patterns: list[re.Pattern[str]],
