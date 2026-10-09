@@ -334,3 +334,7 @@ All 14 prompt files live in `prompts/`:
 | `summarization_system.md` | `_llm_summarize()` — system prompt |
 | `summarization_user.md` | `_incremental_summarize()` — first chunk user prompt |
 | `summarization_incremental_user.md` | `_incremental_summarize()` — subsequent chunk user prompt |
+
+## Source fidelity
+
+Discovery is recursive and case-insensitive, and explicitly selected undated files bypass the automatic filename filter. Source hashes and image decoding are checked before cache reuse. Transport errors propagate without changing the transcription prompt; local failure patterns and unambiguous refusal checks gate publication. Failed pages block the whole document summary. Summary regeneration validates inputs first and retains the last valid summary until a valid replacement is ready. Markdown writes are atomic. Explicit unknown dates remain null, and summarization preserves orders, completion uncertainty, birth dates and handwritten score denominators.

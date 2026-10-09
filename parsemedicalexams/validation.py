@@ -10,9 +10,20 @@ from .models import ValidationMetadata
 
 HARD_FAILURE_PATTERNS = [
     re.compile(r"Request too large\. Try with a smaller file\.", re.IGNORECASE),
+    re.compile(r"^\s*API\s+Error\s*:", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"\binvalid_request_error\b", re.IGNORECASE),
 ]
 
 MODEL_NARRATION_PATTERNS = [
+    re.compile(
+        r"\b(?:I(?:'m| am) not going to|I (?:cannot|can't|will not|won't))"
+        r"\s+(?:transcribe|process)\s+(?:this|the|private medical)", re.IGNORECASE,
+    ),
+    re.compile(r"\bNot processing private medical documents\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:conversation summary|context preservation|software engineering tasks)\b",
+        re.IGNORECASE,
+    ),
     re.compile(r"\bThis image shows\b", re.IGNORECASE),
     re.compile(r"\bNo readable text is visible on this page\b", re.IGNORECASE),
     re.compile(r"\bNo readable text is clearly visible\b", re.IGNORECASE),

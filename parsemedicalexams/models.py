@@ -95,7 +95,7 @@ class StandardizedExamEntry(TypedDict):
 
 
 class ExamFrontmatter(TypedDict, total=False):
-    exam_date: str
+    exam_date: str | None
     exam_name_raw: str
     title: str
     category: ExamCategory

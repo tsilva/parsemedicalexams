@@ -23,6 +23,7 @@ from .document_io import (
     count_pdf_pages,
     extract_pdf_page_text,
     get_document_output_issue,
+    pdf_copy_is_current,
     persist_temp_images,
     preprocess_pdf_images_to_temp,
     purge_derived_outputs,
@@ -83,7 +84,7 @@ def discover_pdf_files(
     input_path: Path, input_file_regex: str, document: str | None = None
 ) -> list[Path]:
     """Discover candidate PDFs, preferring a direct requested path when present."""
-    pdf_pattern = re.compile(input_file_regex)
+    pdf_pattern = re.compile(input_file_regex, re.IGNORECASE)
     if document:
         direct_candidates = [input_path / document]
         if not document.lower().endswith(".pdf"):
@@ -91,6 +92,13 @@ def discover_pdf_files(
         direct_matches = [candidate for candidate in direct_candidates if candidate.exists()]
         if direct_matches:
             return direct_matches
+        query = Path(document).name.casefold()
+        query_stem = query[:-4] if query.endswith(".pdf") else query
+        requested = sorted(p for p in input_path.rglob("*")
+                           if p.is_file() and p.suffix.casefold() == ".pdf"
+                           and (p.name.casefold() == query or p.stem.casefold() == query_stem))
+        if requested:
+            return requested
 
     try:
         next(input_path.iterdir(), None)
@@ -149,9 +157,16 @@ def reusable_existing_images(
     image_paths: list[Path], doc_stem: str, expected_page_count: int
 ) -> bool:
     """Return True when existing images are a complete ordered page set."""
-    return _existing_image_page_numbers(image_paths, doc_stem) == list(
-        range(1, expected_page_count + 1)
-    )
+    expected_pages = list(range(1, expected_page_count + 1))
+    if _existing_image_page_numbers(image_paths, doc_stem) != expected_pages:
+        return False
+    try:
+        for image_path in image_paths:
+            with Image.open(image_path) as image:
+                image.load()
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def select_documents_to_process(
@@ -471,8 +486,13 @@ def process_single_pdf(
     doc_output_dir = output_path / doc_stem
     working_pdf_path = pdf_path
     existing_output_pdf = doc_output_dir / pdf_path.name
-    if existing_output_pdf.exists():
+    source_changed = existing_output_pdf.exists() and not pdf_copy_is_current(
+        pdf_path, existing_output_pdf,
+    )
+    if existing_output_pdf.exists() and not source_changed:
         working_pdf_path = existing_output_pdf
+    if source_changed:
+        force_regenerate_images = True
 
     if config.dry_run:
         try:

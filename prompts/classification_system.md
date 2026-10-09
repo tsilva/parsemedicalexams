@@ -40,3 +40,5 @@ Extract the following information:
 - facility_name: Healthcare facility name (e.g., "SYNLAB", "Hospital Santo António")
 - physician_name: Name of the physician/doctor who performed, interpreted, or signed the exam (look for signatures, "Dr.", "Dra.", "Médico:", "Realizado por:")
 - department: Department or service within the facility (e.g., "Serviço de Radiologia", "Cardiologia", "Gastroenterologia")
+
+Prescriptions require patient-specific prescribing instructions. A general medication leaflet is clinical product information, not proof of a prescription or use. Prefer the printed product name to a conflicting filename. For genuinely undated documents, return null; do not turn a filename filing date into a performed clinical act.

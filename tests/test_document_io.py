@@ -3,6 +3,7 @@ import shutil
 from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
 from parsemedicalexams.document_io import (
     collect_output_assertions,
@@ -176,6 +177,20 @@ def test_copy_source_pdf_propagates_permission_error(tmp_path, monkeypatch):
         copy_source_pdf(source_pdf, doc_dir)
 
 
+def test_copy_source_pdf_refreshes_read_only_existing_copy(tmp_path):
+    source_pdf = tmp_path / "exam.pdf"
+    source_pdf.write_bytes(b"new-source")
+    doc_dir = tmp_path / "out"
+    doc_dir.mkdir()
+    copied_pdf = doc_dir / source_pdf.name
+    copied_pdf.write_bytes(b"old-source")
+    copied_pdf.chmod(0o400)
+
+    copy_source_pdf(source_pdf, doc_dir)
+
+    assert copied_pdf.read_bytes() == b"new-source"
+
+
 def test_validate_local_pdf_rejects_cloud_placeholder(tmp_path, monkeypatch):
     source_pdf = tmp_path / "exam.pdf"
     source_pdf.write_bytes(b"%PDF-1.7\n")
@@ -207,7 +222,7 @@ def test_get_document_output_issue_rejects_transcription_without_prompt_variant(
     doc_dir = output_path / source_pdf.stem
     doc_dir.mkdir(parents=True)
     shutil.copy2(source_pdf, doc_dir / source_pdf.name)
-    (doc_dir / "exam.001.jpg").write_bytes(b"jpg")
+    Image.new("RGB", (20, 20)).save(doc_dir / "exam.001.jpg")
     write_markdown_with_frontmatter(
         doc_dir / "exam.001.md",
         {
@@ -255,7 +270,7 @@ def test_get_document_output_issue_accepts_semantic_date_different_from_prefix(
     doc_dir = output_path / source_pdf.stem
     doc_dir.mkdir(parents=True)
     shutil.copy2(source_pdf, doc_dir / source_pdf.name)
-    (doc_dir / f"{source_pdf.stem}.001.jpg").write_bytes(b"jpg")
+    Image.new("RGB", (20, 20)).save(doc_dir / f"{source_pdf.stem}.001.jpg")
 
     exam = make_exam(
         exam_date="1984-11-16",
@@ -529,7 +544,7 @@ def test_regenerate_summaries_reads_markdown_and_writes_summary(tmp_path, monkey
     output_path = tmp_path / "out"
     doc_dir = output_path / "exam"
     doc_dir.mkdir(parents=True)
-    save_transcription_file([make_exam(page_kind="text")], doc_dir, "exam", 1)
+    save_transcription_file([make_exam(page_kind="text", chart_type=None, chart_data_status=None)], doc_dir, "exam", 1)
 
     monkeypatch.setattr(
         "parsemedicalexams.regeneration.summarize_document",

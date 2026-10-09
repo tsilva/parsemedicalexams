@@ -110,3 +110,7 @@ Page markdown files contain YAML frontmatter for fields such as `exam_date`, `ti
 ## License
 
 [MIT](LICENSE)
+
+## Extraction fidelity
+
+Filename filters are case-insensitive. An explicitly selected document can be located recursively even when its name does not match the filter. Undated documents retain `exam_date: null`; dates are not invented to satisfy filename conventions. Reused images must decode successfully and copied PDFs must match the current source. API-error text, transcription refusals and unrelated conversation text are blocking failures. An unavailable or ambiguous refusal check cannot accept a transcription. Summary regeneration validates every input page before requesting a summary, retains the previous summary until a replacement passes validation, and writes Markdown atomically. Orders and referrals must retain their planned/unknown completion status.

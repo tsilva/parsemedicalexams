@@ -91,7 +91,7 @@ def test_extract_completion_text_handles_non_string_content():
     assert extract_completion_text(completion, "test") == ""
 
 
-def test_validate_transcription_allows_empty_refusal_response(caplog):
+def test_validate_transcription_rejects_empty_refusal_response(caplog):
     client = FakeClient(make_completion(None))
 
     with caplog.at_level("WARNING"):
@@ -101,8 +101,8 @@ def test_validate_transcription_allows_empty_refusal_response(caplog):
             client,
         )
 
-    assert (is_valid, reason) == (True, "ok")
-    assert "Empty refusal check response" in caplog.text
+    assert (is_valid, reason) == (False, "refusal_check_inconclusive")
+    assert "Missing completion content" in caplog.text
 
 
 def test_classify_document_retries_missing_tool_call_for_gemini(tmp_path, caplog):

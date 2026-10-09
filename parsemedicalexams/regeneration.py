@@ -15,7 +15,7 @@ from .document_io import (
 )
 from .models import ExamRecord
 from .summarization import summarize_document
-from .validation import first_blocking_issue, validate_summary_output
+from .validation import first_blocking_issue, validate_page_output, validate_summary_output
 
 if TYPE_CHECKING:
     from openai import OpenAI
@@ -79,6 +79,7 @@ def regenerate_summaries(
             continue
 
         all_exams: list[ExamRecord] = []
+        invalid_page = False
         for md_path in md_files:
             parts = md_path.stem.split(".")
             if len(parts) < 2:
@@ -91,6 +92,14 @@ def regenerate_summaries(
             frontmatter, transcription = parse_frontmatter(
                 md_path.read_text(encoding="utf-8")
             )
+            issue = first_blocking_issue(validate_page_output(
+                transcription, page_kind=frontmatter.get("page_kind", "text"),
+                chart_type=frontmatter.get("chart_type"), page=page_num,
+            ))
+            if issue or frontmatter.get("validation_status") in {"failed", "retryable_failure"}:
+                logger.error("Skipping summary regeneration: invalid page %s", md_path.name)
+                invalid_page = True
+                break
             all_exams.append(
                 frontmatter_to_exam(
                     frontmatter,
@@ -100,12 +109,9 @@ def regenerate_summaries(
                 )
             )
 
-        if not all_exams:
+        if invalid_page or not all_exams:
             logger.warning("No exams found in %s", doc_dir)
             continue
-
-        for old_summary in doc_dir.glob("*.summary.md"):
-            old_summary.unlink()
 
         document_summary = summarize_document(
             all_exams,

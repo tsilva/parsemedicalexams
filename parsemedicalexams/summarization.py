@@ -9,7 +9,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from .models import ExamRecord
 from .utils import load_prompt, require_completion_text
-from .validation import first_blocking_issue, validate_summary_output
+from .validation import first_blocking_issue, validate_page_output, validate_summary_output
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,14 @@ def summarize_document(
     Uses incremental chunked summarization to fit within token budget."""
     if not exams:
         return ""
+    for exam in exams:
+        if exam.validation_status in {"failed", "retryable_failure"} or first_blocking_issue(
+            validate_page_output(
+                exam.transcription, page_kind=exam.page_kind, chart_type=exam.chart_type,
+            )
+        ):
+            logger.error("Cannot summarize a document containing a failed transcription")
+            return ""
 
     exams_with_content = [
         exam

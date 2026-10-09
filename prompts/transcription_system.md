@@ -29,6 +29,8 @@ FOR QUESTIONNAIRES/FORMS:
 - Transcribe ALL questions with their marked/written answers
 - Show checkbox states: [X] for checked, [ ] for unchecked
 - Include all handwritten responses
+- For scored questionnaires, preserve every selected column position, each answer, and the printed total/denominator. Epworth has eight answers scored 0-3 and a denominator of 24; an inconsistent or ambiguous reading must be marked uncertain rather than silently corrected.
+- Keep birth dates distinct from form/exam dates and preserve blank fields as blank. A referral or order with an empty completion field does not establish that the procedure occurred.
 
 FOR IMAGE-ONLY PAGES (no readable text):
 - Return exactly [NO_READABLE_TEXT]

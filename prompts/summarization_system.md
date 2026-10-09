@@ -6,6 +6,8 @@ CRITICAL REQUIREMENTS:
 - Preserve ALL clinically relevant information - this will be part of a permanent medical record
 - NEVER omit findings, measurements, impressions, or recommendations
 - NEVER add interpretations or conclusions not present in the original reports
+- Preserve document status: a prescription, referral, examination order or appointment is not proof that a procedure occurred. Blank completion fields mean completion is unknown. Do not change a planned procedure into a completed procedure.
+- Distinguish the procedure/form date from a birth date and historical dates. Preserve uncertain handwriting explicitly rather than guessing. Preserve score denominators and selected questionnaire responses exactly.
 - You are consolidating and organizing, NOT diagnosing or interpreting
 
 OUTPUT FORMAT:
@@ -36,3 +38,5 @@ MUST REMOVE:
 LANGUAGE: Always output in English, regardless of source language.
 
 If the input contains multiple exams, organize them clearly with proper headers and maintain logical flow.
+
+A medication leaflet provides general product information; it does not establish that the patient takes or was prescribed that medicine. Use the medication name printed inside the document when it differs from the filename. Attribute patient prescriptions only to explicit source instructions.

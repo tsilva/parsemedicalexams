@@ -485,7 +485,7 @@ def transcribe_with_retry(
                 image_path.name,
                 exc,
             )
-            continue
+            raise
 
     if transcription:
         raise RuntimeError(
@@ -537,15 +537,16 @@ Is this a refusal to transcribe medical content? Reply with only "yes" or "no"."
             max_tokens=10,
         )
         result = extract_completion_text(response, "refusal check").lower()
-        if not result:
-            logger.warning("Empty refusal check response, assuming transcription is valid")
+        verdict = result.strip().rstrip(".").strip()
+        if verdict == "no":
             return (True, "ok")
-        if "yes" in result:
+        if verdict == "yes":
             return (False, "refusal")
+        return (False, "refusal_check_inconclusive")
     except APIError as exc:
         logger.warning("Failed to check for refusal with LLM: %s", exc)
 
-    return (True, "ok")
+    return (False, "refusal_check_unavailable")
 
 
 def _normalize_date_format(date_str: str | None) -> str | None:

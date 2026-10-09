@@ -58,6 +58,14 @@ def _clear_file_flags(path: Path) -> None:
         logger.debug("Could not clear file flags for %s: %s", path, exc)
 
 
+def _make_generated_file_writable(path: Path) -> None:
+    """Ensure a generated file can be refreshed on a later parser run."""
+    if not path.exists():
+        return
+    _clear_file_flags(path)
+    path.chmod(path.stat().st_mode | 0o200)
+
+
 def _clear_removal_flags(path: Path) -> None:
     """Clear removable flags recursively before deleting an output directory."""
     if path.is_symlink():
@@ -308,6 +316,7 @@ def build_exam_frontmatter(
         for exam_key, frontmatter_key in FRONTMATTER_FIELD_MAP.items()
         if (value := getattr(exam, exam_key)) is not None and value != ""
     }
+    mapped["exam_date"] = exam.exam_date
     frontmatter = cast(ExamFrontmatter, mapped)
     if extra_fields:
         frontmatter.update(extra_fields)
@@ -318,19 +327,24 @@ def write_markdown_with_frontmatter(
     path: Path, frontmatter: ExamFrontmatter, body: str
 ) -> None:
     """Write a markdown file with YAML frontmatter."""
-    with path.open("w", encoding="utf-8") as handle:
-        if frontmatter:
-            handle.write("---\n")
-            handle.write(
-                yaml.dump(
-                    frontmatter,
-                    default_flow_style=False,
-                    allow_unicode=True,
-                    sort_keys=False,
-                )
-            )
-            handle.write("---\n\n")
-        handle.write(body)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            if frontmatter:
+                handle.write("---\n")
+                handle.write(yaml.dump(
+                    frontmatter, default_flow_style=False, allow_unicode=True, sort_keys=False,
+                ))
+                handle.write("---\n\n")
+            handle.write(body)
+        _clear_file_flags(path)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
 
 
 def purge_derived_outputs(
@@ -355,6 +369,8 @@ def _coerce_frontmatter(raw: object) -> ExamFrontmatter:
         return {}
 
     frontmatter: dict[str, object] = {}
+    if "exam_date" in raw and raw["exam_date"] is None:
+        frontmatter["exam_date"] = None
     raw_mapping = {key: raw.get(key) for key in FRONTMATTER_FIELDS}
 
     for key in ("exam_date", "exam_name_raw", "title", "doctor", "facility", "department"):
@@ -582,6 +598,12 @@ def get_document_output_issue(pdf_path: Path, output_path: Path) -> str | None:
             f"page image count mismatch ({len(jpg_files)} images, "
             f"{expected_page_count} PDF pages)"
         )
+    try:
+        for image_path in jpg_files:
+            with Image.open(image_path) as image:
+                image.load()
+    except (OSError, ValueError):
+        return "corrupt page image"
 
     if len(jpg_files) != len(markdown_files):
         return (
@@ -734,8 +756,9 @@ def copy_source_pdf(source_pdf: Path, doc_output_dir: Path) -> None:
     if pdf_copy_is_current(source_pdf, copied_pdf):
         return
     try:
+        _make_generated_file_writable(copied_pdf)
         shutil.copy2(source_pdf, copied_pdf)
-        _clear_file_flags(copied_pdf)
+        _make_generated_file_writable(copied_pdf)
     except PermissionError:
         logger.warning(
             "Could not copy PDF to output (permission denied): %s",
