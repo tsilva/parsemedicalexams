@@ -9,6 +9,9 @@ output_path: "/path/to/your/output"
 
 # Optional: Filter which PDFs to process (default: .*\.pdf)
 input_file_regex: ".*\\.pdf"
+# Optional convention for a folder shared with parselabs. Case-insensitively
+# exclude names beginning with "analises", optionally after a YYYY-MM-DD prefix:
+# input_file_regex: '^(?!(?:\d{4}-\d{2}-\d{2}\s*-\s*)?analises(?:\s|[-.]|$)).*\.pdf$'
 
 # Shared API key and model IDs live in ~/.config/parsemedicalexams/.env
 # You can still override them here if needed:

@@ -64,6 +64,28 @@ Run the parser:
 parsemedicalexams --profile myprofile
 ```
 
+### Optional shared-folder routing
+
+When source folders contain both labs and medical exams, a filename convention
+can keep automatic discovery separate. Label lab PDFs `analises.pdf` or
+`YYYY-MM-DD - analises - description.pdf` and other exams with their exam name.
+Selection is case-insensitive and recursive. This is a naming convention, not
+clinical document classification; verify the filenames before adopting it.
+
+In parselabs, `paths.input_file_regex: "*analises*.pdf"` is a **glob**. In
+parsemedicalexams, `input_file_regex` is a **regular expression**:
+
+```yaml
+input_file_regex: '^(?!(?:\d{4}-\d{2}-\d{2}\s*-\s*)?analises(?:\s|[-.]|$)).*\.pdf$'
+```
+
+The exam expression excludes a leading `analises` label, optionally after an ISO
+date. The lab glob also matches that word elsewhere, so arbitrary filenames are
+not guaranteed to form a disjoint partition. Lab discovery additionally excludes
+explicitly labelled `receita`, `pedido exame` and `bula` documents. An explicit
+parsemedicalexams `--document` request bypasses its automatic filename filter.
+Keep existing profile overrides; neither parser's all-PDF default changes.
+
 ## Local profile shortcuts
 
 To browse external profiles from this checkout, create the following local
