@@ -7,6 +7,8 @@ import logging
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
+from parsemedicalexams.agentbridge import model_id as gateway_model
+
 from .models import ExamRecord
 from .utils import load_prompt, require_completion_text
 from .validation import (
@@ -58,7 +60,7 @@ def _llm_summarize(
 ) -> str:
     """Make a single LLM summarization call."""
     completion = client.chat.completions.create(
-        model=model_id,
+        model=gateway_model(model_id),
         messages=messages,
         temperature=0.1,
         max_tokens=4000,

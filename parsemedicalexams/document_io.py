@@ -173,10 +173,7 @@ def validate_metadata_frontmatter(
         issues.append("invalid_chart_type")
 
     chart_data_status = frontmatter.get("chart_data_status")
-    if (
-        chart_data_status is not None
-        and chart_data_status not in ALLOWED_CHART_DATA_STATUSES
-    ):
+    if chart_data_status is not None and chart_data_status not in ALLOWED_CHART_DATA_STATUSES:
         issues.append("invalid_chart_data_status")
 
     failure_type = frontmatter.get("failure_type")
@@ -213,9 +210,7 @@ def validate_metadata_frontmatter(
 def transcription_files(doc_dir: Path, doc_stem: str) -> list[Path]:
     """Return all transcription .md files (excluding .summary.md) in doc_dir."""
     return [
-        path
-        for path in doc_dir.glob(f"{doc_stem}.*.md")
-        if not path.name.endswith(".summary.md")
+        path for path in doc_dir.glob(f"{doc_stem}.*.md") if not path.name.endswith(".summary.md")
     ]
 
 
@@ -325,9 +320,7 @@ def build_exam_frontmatter(
     return frontmatter
 
 
-def write_markdown_with_frontmatter(
-    path: Path, frontmatter: ExamFrontmatter, body: str
-) -> None:
+def write_markdown_with_frontmatter(path: Path, frontmatter: ExamFrontmatter, body: str) -> None:
     """Write a markdown file with YAML frontmatter."""
     temporary: Path | None = None
     try:
@@ -349,9 +342,7 @@ def write_markdown_with_frontmatter(
             temporary.unlink()
 
 
-def purge_derived_outputs(
-    doc_output_dir: Path, doc_stem: str, remove_images: bool
-) -> None:
+def purge_derived_outputs(doc_output_dir: Path, doc_stem: str, remove_images: bool) -> None:
     """Delete generated page markdown and summary outputs for a document."""
     if not doc_output_dir.exists():
         return
@@ -410,10 +401,7 @@ def _coerce_frontmatter(raw: object) -> ExamFrontmatter:
         frontmatter["chart_type"] = chart_type
 
     chart_data_status = raw_mapping.get("chart_data_status")
-    if (
-        isinstance(chart_data_status, str)
-        and chart_data_status in ALLOWED_CHART_DATA_STATUSES
-    ):
+    if isinstance(chart_data_status, str) and chart_data_status in ALLOWED_CHART_DATA_STATUSES:
         frontmatter["chart_data_status"] = chart_data_status
 
     retry_attempts = raw_mapping.get("retry_attempts")
@@ -471,14 +459,11 @@ def frontmatter_to_exam(
     chart_data_status = raw_frontmatter.get("chart_data_status")
     prompt_variant_value = prompt_variant if isinstance(prompt_variant, str) else None
     page_kind_value = (
-        page_kind
-        if isinstance(page_kind, str) and page_kind in ALLOWED_PAGE_KINDS
-        else "text"
+        page_kind if isinstance(page_kind, str) and page_kind in ALLOWED_PAGE_KINDS else "text"
     )
     validation_status_value = (
         validation_status
-        if isinstance(validation_status, str)
-        and validation_status in ALLOWED_VALIDATION_STATUSES
+        if isinstance(validation_status, str) and validation_status in ALLOWED_VALIDATION_STATUSES
         else "ok"
     )
     failure_type_value = failure_type if isinstance(failure_type, str) else None
@@ -488,14 +473,11 @@ def frontmatter_to_exam(
         else "vision"
     )
     chart_type_value = (
-        chart_type
-        if isinstance(chart_type, str) and chart_type in ALLOWED_CHART_TYPES
-        else None
+        chart_type if isinstance(chart_type, str) and chart_type in ALLOWED_CHART_TYPES else None
     )
     chart_data_status_value = (
         chart_data_status
-        if isinstance(chart_data_status, str)
-        and chart_data_status in ALLOWED_CHART_DATA_STATUSES
+        if isinstance(chart_data_status, str) and chart_data_status in ALLOWED_CHART_DATA_STATUSES
         else None
     )
     return ExamRecord(
@@ -597,8 +579,7 @@ def get_document_output_issue(pdf_path: Path, output_path: Path) -> str | None:
     expected_page_count = count_pdf_pages(copied_pdf)
     if len(jpg_files) != expected_page_count:
         return (
-            f"page image count mismatch ({len(jpg_files)} images, "
-            f"{expected_page_count} PDF pages)"
+            f"page image count mismatch ({len(jpg_files)} images, {expected_page_count} PDF pages)"
         )
     try:
         for image_path in jpg_files:
@@ -609,8 +590,7 @@ def get_document_output_issue(pdf_path: Path, output_path: Path) -> str | None:
 
     if len(jpg_files) != len(markdown_files):
         return (
-            f"page count mismatch ({len(jpg_files)} images, "
-            f"{len(markdown_files)} transcriptions)"
+            f"page count mismatch ({len(jpg_files)} images, {len(markdown_files)} transcriptions)"
         )
 
     summary_path = doc_output_dir / f"{doc_stem}.summary.md"
@@ -869,9 +849,7 @@ def validate_frontmatter(
     """Validate that all .md files have YAML frontmatter with required fields."""
     issues = []
     doc_dirs = [
-        doc_dir
-        for doc_dir in output_path.iterdir()
-        if doc_dir.is_dir() and doc_dir.name != "logs"
+        doc_dir for doc_dir in output_path.iterdir() if doc_dir.is_dir() and doc_dir.name != "logs"
     ]
     for doc_dir in doc_dirs:
         doc_stem = doc_dir.name
@@ -898,16 +876,11 @@ def collect_output_assertions(
     output_path: Path,
     input_path: Path,
 ) -> dict[str, list[str]]:
-    """Collect post-run output assertions grouped by category."""
-    purge_orphan_output_dirs(output_path, input_path)
+    """Collect post-run output assertions without mutating parser outputs."""
     source_doc_stems = {pdf_path.stem for pdf_path in input_path.glob("**/*.pdf")}
     grouped_issues = {
         "output bundle issues": validate_pipeline_outputs(pdf_files, output_path),
         "frontmatter issues": validate_frontmatter(output_path, source_doc_stems),
         "orphaned output directories": validate_orphan_output_dirs(output_path, input_path),
     }
-    return {
-        category: issues
-        for category, issues in grouped_issues.items()
-        if issues
-    }
+    return {category: issues for category, issues in grouped_issues.items() if issues}

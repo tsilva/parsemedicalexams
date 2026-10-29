@@ -73,3 +73,6 @@ profiles/*.yml
 sdist/
 var/
 wheels/
+
+# Local shortcuts to external runtime profiles
+/.config/

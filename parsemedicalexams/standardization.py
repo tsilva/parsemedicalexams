@@ -6,6 +6,8 @@ import logging
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
+from parsemedicalexams.agentbridge import model_id as gateway_model
+
 from .config import get_cache_dir
 from .models import ALLOWED_CATEGORIES, ExamCategory, StandardizedExamEntry
 from .utils import load_prompt, parse_json_mapping, require_completion_text
@@ -100,7 +102,7 @@ def standardize_exam_types(
             {"role": "user", "content": user_prompt},
         ]
         completion = client.chat.completions.create(
-            model=model_id,
+            model=gateway_model(model_id),
             messages=messages,
             temperature=0.1,
             max_tokens=4000,

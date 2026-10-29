@@ -282,14 +282,14 @@ def test_get_document_output_issue_accepts_semantic_date_different_from_prefix(
     save_transcription_file([exam], doc_dir, source_pdf.stem, 1)
     (doc_dir / f"{source_pdf.stem}.summary.md").write_text(
         (
-                "---\n"
-                "exam_date: '2025-08-22'\n"
-                "exam_name_raw: Summary\n"
-                "category: other\n"
-                "title: Summary\n"
-                "---\n\n"
-                "Long enough summary body with clinically meaningful details "
-                "to satisfy the summary output validator.\n"
+            "---\n"
+            "exam_date: '2025-08-22'\n"
+            "exam_name_raw: Summary\n"
+            "category: other\n"
+            "title: Summary\n"
+            "---\n\n"
+            "Long enough summary body with clinically meaningful details "
+            "to satisfy the summary output validator.\n"
         ),
         encoding="utf-8",
     )
@@ -400,11 +400,13 @@ def test_collect_output_assertions_groups_all_post_run_issues(tmp_path):
     grouped = collect_output_assertions([source_pdf], output_path, input_path)
 
     assert grouped["output bundle issues"] == ["exam: missing output folder"]
-    assert "orphaned output directories" not in grouped
-    assert not orphan_dir.exists()
+    assert grouped["orphaned output directories"] == [
+        "orphan: output directory has no matching source PDF"
+    ]
+    assert orphan_dir.exists()
 
 
-def test_collect_output_assertions_skips_frontmatter_checks_for_orphans(tmp_path):
+def test_collect_output_assertions_reports_orphans_without_deleting_them(tmp_path):
     input_path = tmp_path / "input"
     output_path = tmp_path / "out"
     input_path.mkdir()
@@ -431,8 +433,10 @@ def test_collect_output_assertions_skips_frontmatter_checks_for_orphans(tmp_path
     grouped = collect_output_assertions([source_pdf], output_path, input_path)
 
     assert "frontmatter issues" not in grouped
-    assert "orphaned output directories" not in grouped
-    assert not orphan_dir.exists()
+    assert grouped["orphaned output directories"] == [
+        f"{orphan_stem}: output directory has no matching source PDF"
+    ]
+    assert orphan_dir.exists()
 
 
 def test_validate_frontmatter_accepts_semantic_date_different_from_prefix(tmp_path):
@@ -544,7 +548,9 @@ def test_regenerate_summaries_reads_markdown_and_writes_summary(tmp_path, monkey
     output_path = tmp_path / "out"
     doc_dir = output_path / "exam"
     doc_dir.mkdir(parents=True)
-    save_transcription_file([make_exam(page_kind="text", chart_type=None, chart_data_status=None)], doc_dir, "exam", 1)
+    save_transcription_file(
+        [make_exam(page_kind="text", chart_type=None, chart_data_status=None)], doc_dir, "exam", 1
+    )
 
     monkeypatch.setattr(
         "parsemedicalexams.regeneration.summarize_document",

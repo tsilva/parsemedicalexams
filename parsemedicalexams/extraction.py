@@ -17,6 +17,8 @@ from openai.types.chat import (
 )
 from pydantic import BaseModel, Field
 
+from parsemedicalexams.agentbridge import model_id as gateway_model
+
 from .utils import (
     extract_completion_text,
     extract_dates_from_text,
@@ -71,8 +73,7 @@ class DocumentClassification(BaseModel):
     reason: str | None = Field(
         default=None,
         description=(
-            "Short explanation for the classification decision, "
-            "especially when is_exam is false"
+            "Short explanation for the classification decision, especially when is_exam is false"
         ),
     )
 
@@ -154,6 +155,7 @@ def _create_classification_completion(
         kwargs["extra_body"] = extra_body
     return client.chat.completions.create(**kwargs)
 
+
 def _encode_image(image_path: Path) -> ChatCompletionContentPartImageParam:
     with image_path.open("rb") as img_file:
         img_data = base64.standard_b64encode(img_file.read()).decode("utf-8")
@@ -220,15 +222,14 @@ def vote_on_best_result(
     system_prompt = load_prompt("voting_system")
 
     prompt = "".join(
-        f"--- Output {index + 1} ---\n{value}\n\n"
-        for index, value in enumerate(results)
+        f"--- Output {index + 1} ---\n{value}\n\n" for index, value in enumerate(results)
     )
     messages: list[ChatCompletionMessageParam] = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": prompt},
     ]
     completion = client.chat.completions.create(
-        model=model_id,
+        model=gateway_model(model_id),
         temperature=0.1,
         messages=messages,
     )
@@ -269,7 +270,7 @@ def classify_document(
             ),
         },
     ]
-    attempts = [
+    attempts: list[dict[str, object]] = [
         {
             "max_tokens": CLASSIFICATION_MAX_TOKENS,
             "extra_body": None,
@@ -371,7 +372,7 @@ def transcribe_page(
         },
     ]
     completion = client.chat.completions.create(
-        model=model_id,
+        model=gateway_model(model_id),
         messages=messages,
         temperature=temperature,
         max_tokens=16384,
@@ -391,6 +392,7 @@ def transcribe_page(
             logger.debug("Returning raw fenced transcription for %s", image_path.name)
 
     return content
+
 
 def build_chart_user_prompt(chart_type: str, embedded_text: str) -> str:
     """Build chart extraction prompt with embedded-text context."""
@@ -531,7 +533,7 @@ Is this a refusal to transcribe medical content? Reply with only "yes" or "no"."
 
     try:
         response = client.chat.completions.create(
-            model=model_id,
+            model=gateway_model(model_id),
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=10,
@@ -589,7 +591,7 @@ def score_transcription_confidence(
         {"role": "user", "content": user_prompt},
     ]
     completion = client.chat.completions.create(
-        model=model_id,
+        model=gateway_model(model_id),
         temperature=0.1,
         messages=messages,
     )

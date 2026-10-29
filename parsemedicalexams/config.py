@@ -11,6 +11,8 @@ from typing import TypeVar
 import yaml  # type: ignore[import-untyped]
 from dotenv import dotenv_values
 
+from parsemedicalexams.agentbridge import base_url as gateway_base_url
+
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
@@ -20,7 +22,7 @@ LEGACY_CONFIG_DIR = Path.home() / ".config" / "medicalexamsparser"
 PROFILE_EXTENSIONS = (".yaml", ".yml", ".json")
 DEFAULT_MODEL_ID = "google/gemini-3.7-flash"
 DEFAULT_VALIDATION_MODEL_ID = "anthropic/claude-haiku-4.5"
-DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_OPENROUTER_BASE_URL = "http://127.0.0.1:8082/api/v1"
 DEFAULT_N_EXTRACTIONS = 1
 DEFAULT_MAX_WORKERS = 1
 DEFAULT_SUMMARIZE_MAX_INPUT_TOKENS = 100_000
@@ -36,6 +38,7 @@ def _is_running_in_docker() -> bool:
 
 def resolve_base_url(url: str) -> str:
     """Swap 127.0.0.1/localhost with host.docker.internal when running in Docker."""
+    url = gateway_base_url(url)
     if _is_running_in_docker():
         url = url.replace("://127.0.0.1", "://host.docker.internal")
         url = url.replace("://localhost", "://host.docker.internal")
@@ -388,12 +391,11 @@ class ExtractionConfig:
             raise ValueError(f"Profile '{profile.name}' has no output_path defined.")
         shared_env = load_shared_env(profile.source_path.parent)
 
-        openrouter_api_key = profile.openrouter_api_key or shared_env.get("OPENROUTER_API_KEY")
-        if not openrouter_api_key:
-            raise ValueError(
-                f"Missing OPENROUTER_API_KEY in {get_env_path()}."
-                f" Copy {get_env_example_path()} to {get_env_path()} and fill it in."
-            )
+        openrouter_api_key = (
+            os.getenv("AGENTBRIDGE_API_KEY")
+            or shared_env.get("AGENTBRIDGE_API_KEY")
+            or "not-needed"
+        )
 
         default_model = shared_env.get("EXTRACT_MODEL_ID") or DEFAULT_MODEL_ID
 
@@ -416,7 +418,7 @@ class ExtractionConfig:
             openrouter_api_key=openrouter_api_key,
             openrouter_base_url=resolve_base_url(
                 profile.openrouter_base_url
-                or shared_env.get("OPENROUTER_BASE_URL")
+                or shared_env.get("AGENTBRIDGE_BASE_URL")
                 or DEFAULT_OPENROUTER_BASE_URL
             ),
             validation_model_id=(

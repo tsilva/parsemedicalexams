@@ -162,3 +162,7 @@ For issues or questions:
   - Stratified sampling implementation
   - Domain-agnostic design with medical example
   - Comprehensive report generation
+
+## License
+
+[MIT License](../../../LICENSE).

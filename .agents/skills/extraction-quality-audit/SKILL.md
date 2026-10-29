@@ -34,28 +34,31 @@ This skill performs comprehensive quality assessment of document extraction pipe
 
 ## Quick Start
 
+Run the commands below from the repository root. Helper paths are relative to
+that root; the helpers remain beside this skill.
+
 ```bash
 # 0. Run sentinel scan for hard failures and non-transcription output
-python scripts/sentinel_scan.py \
+python .agents/skills/extraction-quality-audit/scripts/sentinel_scan.py \
   --output-dir /path/to/extraction/outputs
 
 # 1. Configure paths in generate_inventory.py
-python ~/.Codex/skills/extraction-quality-audit/scripts/generate_inventory.py \
+python .agents/skills/extraction-quality-audit/scripts/generate_inventory.py \
   --input-dir /path/to/source/documents \
   --output-dir /path/to/extraction/outputs \
   --profile-name your_profile
 
 # 2. Run stratified sampling
-python ~/.Codex/skills/extraction-quality-audit/scripts/stratified_sampling.py \
+python .agents/skills/extraction-quality-audit/scripts/stratified_sampling.py \
   --inventory inventory.json \
   --target-size 30
 
 # 3. Perform systematic verification (interactive with Codex)
-python ~/.Codex/skills/extraction-quality-audit/scripts/verification_framework.py \
+python .agents/skills/extraction-quality-audit/scripts/verification_framework.py \
   --sample sample.json
 
 # 4. Generate comprehensive report
-python ~/.Codex/skills/extraction-quality-audit/scripts/report_generator.py \
+python .agents/skills/extraction-quality-audit/scripts/report_generator.py \
   --inventory inventory.json \
   --sample sample.json \
   --results verification_results.json \
@@ -76,7 +79,7 @@ python ~/.Codex/skills/extraction-quality-audit/scripts/report_generator.py \
 
 **Usage:**
 ```bash
-python scripts/sentinel_scan.py \
+python .agents/skills/extraction-quality-audit/scripts/sentinel_scan.py \
   --output-dir /path/to/extraction/outputs
 ```
 
@@ -105,7 +108,7 @@ python scripts/sentinel_scan.py \
 
 **Usage:**
 ```bash
-python scripts/generate_inventory.py \
+python .agents/skills/extraction-quality-audit/scripts/generate_inventory.py \
   --input-dir /path/to/source/docs \
   --output-dir /path/to/extraction/outputs \
   --profile-name profile_name \
@@ -166,7 +169,7 @@ python scripts/generate_inventory.py \
 
 **Usage:**
 ```bash
-python scripts/stratified_sampling.py \
+python .agents/skills/extraction-quality-audit/scripts/stratified_sampling.py \
   --inventory inventory.json \
   --target-size 30 \
   --config sampling_config.json \
@@ -228,7 +231,7 @@ Edit `sampling_config.json`:
 
 **Usage:**
 ```bash
-python scripts/verification_framework.py \
+python .agents/skills/extraction-quality-audit/scripts/verification_framework.py \
   --sample sample.json \
   --results verification_results.json
 ```
@@ -387,7 +390,7 @@ Codex will:
 
 **Usage:**
 ```bash
-python scripts/report_generator.py \
+python .agents/skills/extraction-quality-audit/scripts/report_generator.py \
   --inventory inventory.json \
   --sample sample.json \
   --results verification_results.json \
@@ -648,10 +651,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Generate Inventory
-        run: python scripts/generate_inventory.py ...
+        run: python .agents/skills/extraction-quality-audit/scripts/generate_inventory.py ...
 
       - name: Run Sampling
-        run: python scripts/stratified_sampling.py ...
+        run: python .agents/skills/extraction-quality-audit/scripts/stratified_sampling.py ...
 
       - name: Trigger Manual Verification
         uses: peter-evans/create-issue-from-file@v4

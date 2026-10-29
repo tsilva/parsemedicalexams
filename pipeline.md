@@ -21,8 +21,8 @@ Entry point: `parsemedicalexams.cli:main() → parsemedicalexams.pipeline.run_pr
 
 | Variable | Purpose |
 |---|---|
-| `OPENROUTER_API_KEY` | API key for OpenRouter |
-| `OPENROUTER_BASE_URL` | Base URL (default: `https://openrouter.ai/api/v1`) |
+| `AGENTBRIDGE_API_KEY` | Optional gateway token |
+| `AGENTBRIDGE_BASE_URL` | Base URL (default: `http://127.0.0.1:8082/api/v1`) |
 | `EXTRACT_MODEL_ID` | Vision model for classification and transcription |
 | `SELF_CONSISTENCY_MODEL_ID` | Model used when `N_EXTRACTIONS > 1` |
 | `SUMMARIZE_MODEL_ID` | Model for summarization and standardization |

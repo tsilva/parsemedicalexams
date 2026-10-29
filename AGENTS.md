@@ -1,6 +1,6 @@
-# CLAUDE.md
+# Repository instructions
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Codex when working in this repository.
 
 ## Project Overview
 
@@ -55,7 +55,7 @@ parsemedicalexams -p tiago -d exam_2024.pdf
 - **utils.py**: Image preprocessing, logging setup, JSON parsing utilities
 
 ### Configuration
-- `~/.config/parsemedicalexams/.env`: Shared OpenRouter key and model IDs
+- `~/.config/parsemedicalexams/.env`: Shared AgentBridge endpoint, optional gateway token, and model IDs
 - `~/.config/parsemedicalexams/*.yaml|json`: User-specific profile files (paths, filters, patient context)
 - `~/.config/parsemedicalexams/cache/*.json`: LLM response caches (user-editable for overrides)
 - `prompts/*.md`: All LLM prompts externalized as markdown files
@@ -90,3 +90,15 @@ This project follows labs-parser conventions:
 - Two-column naming pattern: `*_raw` (exact from document), `*_standardized` (LLM-mapped)
 - Persistent JSON caches for LLM standardization (avoids repeated API calls, user-editable)
 - Profile system for user-specific input/output paths
+
+## Local profile shortcuts
+
+The repo `.config/` directory is Git-ignored and exposes only external runtime
+profiles for local browsing. `.config/profiles/` contains individual file
+symlinks to explicitly selected profiles in `~/.config/parsemedicalexams/`; never link
+the whole runtime root. Add a separate link for each new profile. Do not move actual runtime files into the checkout or expose `.env`,
+credentials, sessions, databases, caches, logs or parser outputs through these
+shortcuts. Edits through a profile link affect its original and retain all
+existing source-write restrictions. Runtime discovery paths are unchanged.
+See README.md for recreation commands; links are local and external profiles
+require independent backups.

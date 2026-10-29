@@ -35,10 +35,10 @@ cp .env.example ~/.config/parsemedicalexams/.env
 cp profiles/template.yaml.example ~/.config/parsemedicalexams/myprofile.yaml
 ```
 
-Edit `~/.config/parsemedicalexams/.env` with your OpenRouter key and model IDs:
+Edit `~/.config/parsemedicalexams/.env` with your model IDs and optional gateway token:
 
 ```dotenv
-OPENROUTER_API_KEY=your_api_key
+AGENTBRIDGE_API_KEY=your_api_key
 EXTRACT_MODEL_ID=google/gemini-3.7-flash
 SUMMARIZE_MODEL_ID=google/gemini-3.7-flash
 SELF_CONSISTENCY_MODEL_ID=google/gemini-3.7-flash
@@ -63,6 +63,32 @@ Run the parser:
 ```bash
 parsemedicalexams --profile myprofile
 ```
+
+## Local profile shortcuts
+
+To browse external profiles from this checkout, create the following local
+shortcuts after configuring the runtime profiles:
+
+```bash
+mkdir -p .config/profiles
+profile_name=myprofile
+ln -s "$HOME/.config/parsemedicalexams/${profile_name}.yaml" ".config/profiles/${profile_name}.yaml"
+```
+
+`.config/profiles/` is a local directory containing individual symlinks to
+selected profile files in `~/.config/parsemedicalexams/`. Replace `myprofile` with an
+existing profile name; repeat the link command for each profile you want to
+expose. New profiles require their own link. Do not symlink the entire runtime
+root: it also contains credentials or other private runtime state.
+
+The entire repo `.config/` directory is Git-ignored. Actual profile files stay
+outside the checkout; editing through a shortcut edits the original, and the
+link is not a read-only view or a backup. Git cleanup can remove the local
+shortcut without deleting its external target. Recreate shortcuts after cloning
+or cleanup, and back up the external profiles independently. Shared `.env`
+files, credential stores, sessions, databases, caches, logs and parser outputs
+remain outside these shortcuts. Runtime discovery paths and CLI behavior are
+unchanged.
 
 ## Commands
 
@@ -97,7 +123,7 @@ Page markdown files contain YAML frontmatter for fields such as `exam_date`, `ti
 
 ## Notes
 
-- Requires Python 3.10+, Poppler, and an OpenRouter API key.
+- Requires Python 3.10+, Poppler, and a reachable AgentBridge endpoint.
 - PDF page images and extracted text are sent to the configured OpenRouter-compatible API.
 - Prompts are stored in `prompts/*.md`; model defaults and API settings are stored in the shared `.env`.
 - Standardization caches live in `~/.config/parsemedicalexams/cache/*.json` and can be edited to override future mappings.
@@ -107,9 +133,14 @@ Page markdown files contain YAML frontmatter for fields such as `exam_date`, `ti
 
 ![parsemedicalexams architecture diagram](./architecture.png)
 
-## License
+## AgentBridge routing
 
-[MIT](LICENSE)
+Model requests use only AgentBridge. Set `AGENTBRIDGE_BASE_URL` to its API root
+(default `http://127.0.0.1:8082/api/v1`). `AGENTBRIDGE_API_KEY` is an optional
+gateway token. OpenRouter credentials belong to AgentBridge. Existing model
+choices are retained; raw upstream IDs gain `openrouter/` only on outbound
+requests. There is no direct OpenRouter endpoint or fallback. Hosted deployments
+must configure a reachable AgentBridge URL instead of the loopback default.
 
 ## Extraction fidelity
 
@@ -120,3 +151,7 @@ Automatic discovery includes nested files with `.pdf` or `.PDF` extensions. When
 Filename filters are case-insensitive. An explicitly selected document can be located recursively even when its name does not match the filter. Undated documents retain `exam_date: null`; dates are not invented to satisfy filename conventions. Reused images must decode successfully and copied PDFs must match the current source. API-error text, transcription refusals and unrelated conversation text are blocking failures. An unavailable or ambiguous refusal check cannot accept a transcription. Summary regeneration validates every input page before requesting a summary, retains the previous summary until a replacement passes validation, and writes Markdown atomically. Orders and referrals must retain their planned/unknown completion status.
 
 Audiogram output also retains additional bracket-symbol curves and all readable speech-response points in separate tables; the required scaffold must not discard measurements. Symbols and unknown legend/masking status remain explicit.
+
+## License
+
+[MIT](LICENSE)
