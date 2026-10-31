@@ -3,7 +3,7 @@ name = "parsemedicalexams"
 dynamic = ["version"]
 description = "Extract and summarize medical exam reports (X-rays, MRIs, ultrasounds, etc.) with AI precision"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 authors = [
     {name = "Tiago Silva", email = "tiago@tsilva.com"}
@@ -13,14 +13,13 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Healthcare Industry",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
 
 dependencies = [
     "openai",
-    "pillow>=12.3.0",
+    "pillow>=13.0.0",
     "pdf2image",
     "python-dotenv>=1.2.2",
     "pydantic",
@@ -96,4 +95,7 @@ constraint-dependencies = [
   "guardrails-ai!=0.10.1",
   "anyio>=4.14.2",
   "urllib3>=2.8.0",
+  "certifi>=2026.10.19",
+  "filelock>=4.2.1",
+  "msgpack>=1.2.3",
 ]

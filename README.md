@@ -150,7 +150,7 @@ Page markdown files contain YAML frontmatter for fields such as `exam_date`, `ti
 
 ## Notes
 
-- Requires Python 3.10+, Poppler, and a reachable AgentBridge endpoint.
+- Requires Python 3.11+, Poppler, and a reachable AgentBridge endpoint.
 - PDF page images and extracted text are sent to the configured OpenRouter-compatible API.
 - Prompts are stored in `prompts/*.md`; model defaults and API settings are stored in the shared `.env`.
 - Standardization caches live in `~/.config/parsemedicalexams/cache/*.json` and can be edited to override future mappings.
