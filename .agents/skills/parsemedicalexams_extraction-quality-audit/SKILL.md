@@ -1,5 +1,5 @@
 ---
-name: extraction-quality-audit
+name: parsemedicalexams_extraction-quality-audit
 description: Comprehensive quality assessment for document extraction pipelines. Use when (1) After implementing extraction pipeline, (2) Before production deployment, (3) Periodic quality audits, (4) Investigating suspected quality issues, (5) Validating pipeline changes, (6) Benchmarking extraction accuracy across document types/eras. Performs stratified sampling, systematic verification, pattern analysis, and generates detailed quality reports.
 ---
 
@@ -37,32 +37,45 @@ This skill performs comprehensive quality assessment of document extraction pipe
 Run the commands below from the repository root. Helper paths are relative to
 that root; the helpers remain beside this skill.
 
+Use a private task-artifact directory outside this source checkout and original
+document directories by default. The old root-level JSON/Markdown artifact names
+are not Git-ignored here. If the user selects an ignored work folder instead,
+verify its effective Git exclusion before saving private metadata. Replace
+`/absolute/private-audit` below with the chosen existing artifact directory;
+keep inventories, results, reports and per-run configuration there.
+
 ```bash
 # 0. Run sentinel scan for hard failures and non-transcription output
-python .agents/skills/extraction-quality-audit/scripts/sentinel_scan.py \
-  --output-dir /path/to/extraction/outputs
+python .agents/skills/parsemedicalexams_extraction-quality-audit/scripts/sentinel_scan.py \
+  --output-dir /path/to/extraction/outputs \
+  --json-output /absolute/private-audit/sentinel_failures.json
 
-# 1. Configure paths in generate_inventory.py
-python .agents/skills/extraction-quality-audit/scripts/generate_inventory.py \
+# 1. Build the inventory using the selected paths
+python .agents/skills/parsemedicalexams_extraction-quality-audit/scripts/generate_inventory.py \
   --input-dir /path/to/source/documents \
   --output-dir /path/to/extraction/outputs \
-  --profile-name your_profile
+  --profile-name your_profile \
+  --output /absolute/private-audit/inventory.json
 
 # 2. Run stratified sampling
-python .agents/skills/extraction-quality-audit/scripts/stratified_sampling.py \
-  --inventory inventory.json \
-  --target-size 30
+python .agents/skills/parsemedicalexams_extraction-quality-audit/scripts/stratified_sampling.py \
+  --inventory /absolute/private-audit/inventory.json \
+  --sentinel-report /absolute/private-audit/sentinel_failures.json \
+  --target-size 30 \
+  --output /absolute/private-audit/sample.json
 
 # 3. Perform systematic verification (interactive with Codex)
-python .agents/skills/extraction-quality-audit/scripts/verification_framework.py \
-  --sample sample.json
+python .agents/skills/parsemedicalexams_extraction-quality-audit/scripts/verification_framework.py \
+  --sample /absolute/private-audit/sample.json \
+  --results /absolute/private-audit/verification_results.json
 
 # 4. Generate comprehensive report
-python .agents/skills/extraction-quality-audit/scripts/report_generator.py \
-  --inventory inventory.json \
-  --sample sample.json \
-  --results verification_results.json \
-  --output QUALITY_REPORT.md
+python .agents/skills/parsemedicalexams_extraction-quality-audit/scripts/report_generator.py \
+  --inventory /absolute/private-audit/inventory.json \
+  --sample /absolute/private-audit/sample.json \
+  --results /absolute/private-audit/verification_results.json \
+  --sentinel-report /absolute/private-audit/sentinel_failures.json \
+  --output /absolute/private-audit/QUALITY_REPORT.md
 ```
 
 ## Phase 0: Sentinel Failure Scan
@@ -79,8 +92,9 @@ python .agents/skills/extraction-quality-audit/scripts/report_generator.py \
 
 **Usage:**
 ```bash
-python .agents/skills/extraction-quality-audit/scripts/sentinel_scan.py \
-  --output-dir /path/to/extraction/outputs
+python .agents/skills/parsemedicalexams_extraction-quality-audit/scripts/sentinel_scan.py \
+  --output-dir /path/to/extraction/outputs \
+  --json-output /absolute/private-audit/sentinel_failures.json
 ```
 
 **Default sentinel patterns:**
@@ -92,6 +106,15 @@ python .agents/skills/extraction-quality-audit/scripts/sentinel_scan.py \
 - If sentinel failures exist, report their counts first.
 - Promote every affected document into the working sample before random fill.
 - Treat literal failure strings in page outputs or summaries as confirmed extraction failures, not low-confidence warnings.
+
+Pass the saved sentinel JSON to the sampler and report generator. The sampler
+matches full document directories against the explicit inventory and includes
+every matched failure before priority sampling and random fill. Repeated hits
+are deduplicated; missing or ambiguous matches stop rather than silently losing
+known failures. Required cases can exceed the nominal target. Document identity
+is `(profile, doc_stem)` throughout selection and verification; never treat one
+profile's same-named file as verified for another. Unbound historical results
+stay stored but do not complete a profile's review.
 
 ## Phase 1: Document Inventory
 
@@ -108,11 +131,11 @@ python .agents/skills/extraction-quality-audit/scripts/sentinel_scan.py \
 
 **Usage:**
 ```bash
-python .agents/skills/extraction-quality-audit/scripts/generate_inventory.py \
+python .agents/skills/parsemedicalexams_extraction-quality-audit/scripts/generate_inventory.py \
   --input-dir /path/to/source/docs \
   --output-dir /path/to/extraction/outputs \
   --profile-name profile_name \
-  --output inventory.json
+  --output /absolute/private-audit/inventory.json
 ```
 
 **Configuration Options:**
@@ -150,13 +173,13 @@ python .agents/skills/extraction-quality-audit/scripts/generate_inventory.py \
 - `MULTI_PAGE`: 3-9 pages
 - `CAT_[CATEGORY]`: Document category tags
 
-**Customization:** Edit tag definitions in `generate_inventory.py` configuration section.
+**Customization:** Tag definitions are maintained implementation code. Reuse them for an audit; change them only as scoped implementation work with tests. Keep per-audit coverage and priority settings in an external sampling config.
 
 **Reference:** See `references/sampling_methodology.md` for detailed tag design rationale.
 
 ## Phase 2: Stratified Sampling
 
-**Purpose:** Select a representative sample of documents for deep verification using stratified random sampling.
+**Purpose:** Select a priority-based review sample with mandatory known failures, high-risk coverage, diversity checks, and random fill.
 
 **What it does:**
 - Applies priority-based stratified sampling across multiple dimensions
@@ -169,11 +192,11 @@ python .agents/skills/extraction-quality-audit/scripts/generate_inventory.py \
 
 **Usage:**
 ```bash
-python .agents/skills/extraction-quality-audit/scripts/stratified_sampling.py \
-  --inventory inventory.json \
+python .agents/skills/parsemedicalexams_extraction-quality-audit/scripts/stratified_sampling.py \
+  --inventory /absolute/private-audit/inventory.json \
+  --sentinel-report /absolute/private-audit/sentinel_failures.json \
   --target-size 30 \
-  --config sampling_config.json \
-  --output sample.json
+  --output /absolute/private-audit/sample.json
 ```
 
 **Sampling Strategy:**
@@ -187,21 +210,20 @@ python .agents/skills/extraction-quality-audit/scripts/stratified_sampling.py \
    - 40-60% of MULTI_PAGE (3-9 pages)
 
 3. **Balanced representation:**
-   - Proportional sampling across categories
-   - Era diversity (cover all time periods)
-   - Profile/user distribution matching corpus
+   - Existing category quotas, recent-era selection and high-confidence baseline where slots remain
+   - Inspect actual profile, category and era coverage; the helper does not guarantee proportional representation
 
 4. **Random fill:**
    - Remaining slots filled randomly to reach target size
 
 **Target Sample Size:**
-- **Minimum:** 25-30 documents for statistical significance
+- **Minimum review target:** 25-30 documents; this is a work-budget convention, not a statistical-significance guarantee
 - **Large corpora (>500):** 50-75 documents
 - **Very large (>1000):** 100+ documents
 
 **Customizing Sampling:**
 
-Edit `sampling_config.json`:
+Create a per-audit `sampling_config.json` in the private artifact directory and pass `--config /absolute/private-audit/sampling_config.json` only when that existing file is selected:
 ```json
 {
   "priority_tags": {
@@ -214,7 +236,23 @@ Edit `sampling_config.json`:
 }
 ```
 
-**Reference:** See `references/sampling_methodology.md` for stratified sampling theory and best practices.
+**Reference:** See `references/sampling_methodology.md` for the implemented sampling policy and its evidence limits.
+
+The sampler honors `--seed 0`. An explicitly supplied missing configuration is
+an error. Unknown or invalid confidence stays unknown in lists and summaries;
+it is never a high-confidence baseline. Input metadata is not mutated in memory.
+Sample/report destinations cannot overwrite their explicit input metadata
+through direct paths, symlinks or hardlinks. This output check is not a lock;
+keep artifacts separate from original documents and preserve concurrency checks.
+These helpers perform no extraction, provider request or original-document rewrite.
+
+Reports calculate selected and recorded-review coverage from explicit
+profile/document IDs and critical tags plus the supplied sentinel report.
+Duplicate verification records require reconciliation; unbound or out-of-sample
+records are excluded from aggregates and counted visibly without changing their
+source files. Missing scores remain N/A, while a real zero remains a score.
+The report describes the reviewed subset. It does not infer production readiness,
+population confidence or a margin of error from sample size or average ratings.
 
 ## Phase 3: Systematic Verification
 
@@ -231,9 +269,9 @@ Edit `sampling_config.json`:
 
 **Usage:**
 ```bash
-python .agents/skills/extraction-quality-audit/scripts/verification_framework.py \
-  --sample sample.json \
-  --results verification_results.json
+python .agents/skills/parsemedicalexams_extraction-quality-audit/scripts/verification_framework.py \
+  --sample /absolute/private-audit/sample.json \
+  --results /absolute/private-audit/verification_results.json
 ```
 
 **Verification Workflow:**
@@ -287,9 +325,13 @@ For each document in sample:
    - Determine if extraction quality is still acceptable
 
 **Verification Template:**
+
+The JSON below is the inner `verification` object. Store it inside a result
+record retaining the sampled document's explicit `profile` and `doc_stem`. Use
+`null` for unrated dimensions, as the helper's new template does; reserve zero
+for a deliberately observed score. Existing saved results are not rewritten.
 ```json
 {
-  "doc_stem": "document_name",
   "metadata_accuracy": {
     "score": 10,
     "issues": []
@@ -390,59 +432,21 @@ Codex will:
 
 **Usage:**
 ```bash
-python .agents/skills/extraction-quality-audit/scripts/report_generator.py \
-  --inventory inventory.json \
-  --sample sample.json \
-  --results verification_results.json \
-  --output QUALITY_REPORT.md
+python .agents/skills/parsemedicalexams_extraction-quality-audit/scripts/report_generator.py \
+  --inventory /absolute/private-audit/inventory.json \
+  --sample /absolute/private-audit/sample.json \
+  --results /absolute/private-audit/verification_results.json \
+  --sentinel-report /absolute/private-audit/sentinel_failures.json \
+  --output /absolute/private-audit/QUALITY_REPORT.md
 ```
 
-**Report Structure:**
+**Generated report:** Corpus composition, actual sample/tag coverage, example
+verification records, observed score averages, recorded recommendations, and
+critical-case selection/recorded-review counts with evidence limits. Domain
+pattern analysis remains an evidence-based review task; the generator does not
+calculate error rates, correlations or population confidence automatically.
 
-1. **Executive Summary:**
-   - Key findings (3-5 bullet points)
-   - Overall quality grade (A/B/C/D/F)
-   - Critical issues requiring immediate action
-   - Confidence score assessment
-
-2. **Data Landscape:**
-   - Corpus statistics (total docs, profiles, categories)
-   - Temporal distribution (eras)
-   - Confidence score distribution
-   - Complexity distribution
-
-3. **Sampling Methodology:**
-   - Sample size justification
-   - Priority criteria applied
-   - Coverage statistics
-
-4. **Detailed Verification Results:**
-   - Per-document findings for key examples
-   - Quality scores by dimension
-   - Notable issues and patterns
-
-5. **Systematic Pattern Analysis:**
-   - Issues by category, era, complexity
-   - Confidence scoring reliability
-   - Error rate analysis
-
-6. **Quantitative Metrics:**
-   - Aggregate scores table
-   - Error rates by severity
-   - Coverage statistics
-
-7. **Recommendations:**
-   - Immediate actions required
-   - Optional enhancements (priority ranked)
-   - Documents requiring reprocessing
-   - Configuration tuning suggestions
-
-8. **Appendices:**
-   - Detailed document results table
-   - Statistical confidence calculations
-   - Reference to detailed verification data
-
-**Template:** See `references/report_template.md` for complete report structure.
+**Template:** See `references/report_template.md` for a concise review guide. The script generates the maintained baseline report; add narrative analysis only when supported by the records.
 
 ## Customization
 
@@ -485,12 +489,12 @@ Create `references/technical_terminology_guide.md`:
 
 ### Custom Priority Tags
 
-Edit `generate_inventory.py` to add custom tags:
+Adding tags changes maintained implementation code and needs a separately scoped change with tests. The example below explains the extension point; do not edit helper sources as a per-audit configuration step:
 
 ```python
 # Define custom priority tags
 PRIORITY_TAGS = {
-    'LOW_CONF': lambda doc: doc['min_confidence'] < 0.7,
+    'LOW_CONF': lambda doc: isinstance(doc.get('min_confidence'), (int, float)) and doc['min_confidence'] < 0.7,
     'OLD_DOC': lambda doc: doc.get('era') in ['1990s', '2000s'],
     'COMPLEX': lambda doc: doc['page_count'] >= 10,
     'MULTI_PAGE': lambda doc: 3 <= doc['page_count'] < 10,
@@ -533,13 +537,12 @@ Always ensure 100% coverage of critical cases (LOW_CONF, COMPLEX).
 
 ## Interpretation Guide
 
-### Quality Grades
+### Reviewed-sample ratings
 
-- **A (9-10):** Excellent, production-ready quality
-- **B (7-8.9):** Good, minor improvements recommended
-- **C (5-6.9):** Fair, significant improvements needed before production
-- **D (3-4.9):** Poor, major issues require immediate attention
-- **F (<3):** Failing, unsuitable for production use
+The existing A-F cutoffs describe observed review scores: A ≥9, B ≥7, C ≥5,
+D ≥3, and F below 3. Unrated dimensions remain N/A. These labels are not
+production-readiness decisions and cannot clear recorded critical issues or
+characterize unreviewed documents.
 
 ### Confidence Score Interpretation
 
@@ -566,10 +569,10 @@ Always ensure 100% coverage of critical cases (LOW_CONF, COMPLEX).
 - **Major:** Incorrect technical terms, wrong measurements/amounts, incorrect dates
 - **Minor:** Spacing variations, case inconsistencies, handwriting uncertainty
 
-**Acceptable Error Rates:**
-- Critical: 0% (zero tolerance)
-- Major: <0.1% (near-zero tolerance)
-- Minor: <1% (acceptable for production)
+**Acceptance policy:** Do not invent production pass/fail thresholds from this
+review sample. Report observed severity with an explicit denominator and any
+applicable caller-approved acceptance policy. Missing policy or evidence remains
+unresolved; an average score does not authorize deployment or reprocessing.
 
 ## Troubleshooting
 
@@ -582,11 +585,14 @@ with open(file, 'r', encoding='utf-8') as f:
 
 **Issue:** Can't find source documents for verification
 
-**Solution:** Update path mapping in `verification_framework.py`:
-```python
-def get_document_paths(doc: Dict) -> Dict[str, Path]:
-    # Update this function with your directory structure
+**Solution:** Supply an existing per-audit path config using
+`--path-config /absolute/private-audit/path_config.json`, for example:
+```json
+{"input_dir": "/path/to/selected/source/documents"}
 ```
+The current mapping finds a flat `<doc_stem>.pdf` under that directory. A
+different layout requires a scoped implementation change; do not edit maintained
+helper code as a routine audit step.
 
 **Issue:** Sample is too small or unrepresentative
 
@@ -607,7 +613,8 @@ def get_document_paths(doc: Dict) -> Dict[str, Path]:
 **Solution:**
 - Ensure all input files exist (inventory, sample, results)
 - Check JSON format validity
-- Verify template file exists in references/
+- Reconcile duplicate or unbound profile/document identities
+- Check that the same sentinel report matches the selected inventory
 
 ## Best Practices
 
@@ -651,10 +658,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Generate Inventory
-        run: python .agents/skills/extraction-quality-audit/scripts/generate_inventory.py ...
+        run: python .agents/skills/parsemedicalexams_extraction-quality-audit/scripts/generate_inventory.py ...
 
       - name: Run Sampling
-        run: python .agents/skills/extraction-quality-audit/scripts/stratified_sampling.py ...
+        run: python .agents/skills/parsemedicalexams_extraction-quality-audit/scripts/stratified_sampling.py ...
 
       - name: Trigger Manual Verification
         uses: peter-evans/create-issue-from-file@v4
@@ -690,3 +697,15 @@ For issues or questions:
 ## License
 
 This skill is part of the Codex skills ecosystem and is provided as-is for quality assessment of document extraction pipelines.
+
+## Helper fixture checks
+
+Run from the repository root:
+
+```sh
+python3 -m unittest discover -s .agents/skills/parsemedicalexams_extraction-quality-audit/tests -v
+```
+
+Tests use synthetic metadata and text, not real profiles, source PDFs, extraction
+outputs or provider credentials. Human verification of actual documents remains
+required for a requested audit.

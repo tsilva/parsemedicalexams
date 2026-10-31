@@ -4,7 +4,7 @@ Framework for systematic quality verification of sampled documents.
 This script manages the verification workflow and results tracking.
 
 This is a template-driven framework that guides interactive verification
-with Claude Code. It tracks progress and saves results incrementally.
+with Codex. It tracks progress and saves results incrementally.
 """
 
 import argparse
@@ -12,6 +12,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
+
+from stratified_sampling import document_key, known_number
 
 
 def load_sample(sample_file: Path) -> List[Dict]:
@@ -76,14 +78,14 @@ def create_verification_template() -> Dict:
     """Create a template for verification results."""
     return {
         'metadata_accuracy': {
-            'score': 0,  # 0-10
+            'score': None,  # 0-10
             'issues': []
         },
         'transcription_quality': {
-            'completeness_score': 0,  # 0-10
-            'accuracy_score': 0,  # 0-10
-            'layout_preservation_score': 0,  # 0-10
-            'overall_score': 0,  # 0-10
+            'completeness_score': None,  # 0-10
+            'accuracy_score': None,  # 0-10
+            'layout_preservation_score': None,  # 0-10
+            'overall_score': None,  # 0-10
             'issues': []
         },
         'domain_terminology': {
@@ -91,11 +93,11 @@ def create_verification_template() -> Dict:
             'issues': []
         },
         'summary_quality': {
-            'score': 0,  # 0-10
+            'score': None,  # 0-10
             'issues': []
         },
         'multi_page_coherence': {
-            'score': 0,  # 0-10 (only for multi-page docs)
+            'score': None,  # 0-10 (only for multi-page docs)
             'issues': []
         },
         'overall_assessment': '',  # Excellent/Good/Fair/Poor
@@ -223,26 +225,46 @@ def add_verification_result(
     print(f"\n✓ Verification saved for {doc['doc_stem']}")
 
 
+def verified_document_keys(results):
+    """Unbound legacy results remain stored but never verify a different profile."""
+    keys = set()
+    for result in results:
+        try:
+            keys.add(document_key(result))
+        except ValueError:
+            continue
+    return keys
+
+
 def print_progress(sample: List[Dict], results: List[Dict]):
     """Print verification progress."""
-    verified_stems = {r['doc_stem'] for r in results}
-    remaining = [d for d in sample if d['doc_stem'] not in verified_stems]
+    verified_keys = verified_document_keys(results) & {document_key(doc) for doc in sample}
+    remaining = [d for d in sample if document_key(d) not in verified_keys]
 
     print("\n" + "=" * 80)
     print("VERIFICATION PROGRESS")
     print("=" * 80)
     print(f"Total documents: {len(sample)}")
-    print(f"Verified: {len(verified_stems)} ({len(verified_stems)/len(sample)*100:.1f}%)")
-    print(f"Remaining: {len(remaining)} ({len(remaining)/len(sample)*100:.1f}%)")
+    verified_percent = f'{len(verified_keys) / len(sample) * 100:.1f}%' if sample else 'N/A'
+    remaining_percent = f'{len(remaining) / len(sample) * 100:.1f}%' if sample else 'N/A'
+    print(f"Verified: {len(verified_keys)} ({verified_percent})")
+    print(f"Remaining: {len(remaining)} ({remaining_percent})")
+    if len(results) != len(verified_keys):
+        print('Additional or unbound result records are retained and do not increase this sample progress.')
 
-    if len(verified_stems) > 0:
+    if len(verified_keys) > 0:
         # Calculate average scores
         scores = []
         for result in results:
+            try:
+                if document_key(result) not in verified_keys:
+                    continue
+            except ValueError:
+                continue
             ver = result.get('verification', {})
             trans = ver.get('transcription_quality', {})
-            overall = trans.get('overall_score', 0)
-            if overall > 0:
+            overall = known_number(trans.get('overall_score'), 10)
+            if overall is not None:
                 scores.append(overall)
 
         if scores:
@@ -295,8 +317,8 @@ def main():
 
     # Load existing results
     results = load_results(args.results)
-    verified_stems = {r['doc_stem'] for r in results}
-    print(f"Already verified: {len(verified_stems)} documents")
+    verified_keys = verified_document_keys(results) & {document_key(doc) for doc in sample}
+    print(f"Already verified: {len(verified_keys)} documents")
 
     # Load path configuration if provided
     path_config = None
@@ -315,7 +337,7 @@ def main():
         return
 
     # Find next document to verify
-    remaining = [d for d in sample if d['doc_stem'] not in verified_stems]
+    remaining = [d for d in sample if document_key(d) not in verified_keys]
 
     if not remaining:
         print("\n✓ All documents verified!")
@@ -351,7 +373,7 @@ def main():
         print(f"   Use: create_verification_template() for structure")
 
         print("\n" + "=" * 80)
-        print(f"Progress: {len(verified_stems)}/{len(sample)} documents verified")
+        print(f"Progress: {len(verified_keys)}/{len(sample)} documents verified")
         print("=" * 80)
 
 

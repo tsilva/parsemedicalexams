@@ -2,30 +2,19 @@
 
 This document explains the sampling methodology used in extraction quality audits.
 
-## Overview
+## Review objective and limits
 
-**Stratified random sampling** is a probability sampling technique where the population is divided into distinct subgroups (strata) and random samples are taken from each stratum. This ensures representative coverage of important subpopulations.
+This helper builds a priority-based review sample: mandatory known failures,
+overlapping risk tags, category quotas, and random fill. It aims to find and
+characterize defects in the selected scope. It does not establish a probability
+sampling design or guarantee a representative population estimate.
 
-For extraction quality audits, we stratify by:
-- **Confidence scores** (low, medium, high)
-- **Document complexity** (simple, multi-page, complex)
-- **Time period/era** (1990s, 2000s, 2010s, 2020s)
-- **Document category** (type-specific)
-- **Custom characteristics** (handwritten, image-heavy, etc.)
-
-## Why Stratified Sampling?
-
-**Benefits:**
-1. **Ensures coverage** of rare but critical cases (e.g., low confidence documents)
-2. **More efficient** than simple random sampling for heterogeneous populations
-3. **Reduces sampling error** for important subgroups
-4. **Enables subgroup analysis** (compare quality across document types)
-5. **Statistical rigor** while maintaining practical sample sizes
-
-**Comparison to alternatives:**
-- **Simple random sampling:** Might miss rare cases (e.g., only 5 LOW_CONF docs in 199)
-- **Convenience sampling:** Introduces bias, not statistically valid
-- **Systematic sampling:** Doesn't guarantee representation of small subgroups
+Scores and issue counts describe reviewed documents. A confidence level or
+margin of error needs a justified estimator and sampling model; it does not
+follow from reaching 30 documents. See the
+[NIST confidence-interval explanation](https://itl.nist.gov/div898/handbook/prc/section1/prc14.htm).
+The report calculates explicit coverage and does not manufacture statistical
+confidence or production-readiness conclusions.
 
 ## Priority Tag System
 
@@ -94,17 +83,12 @@ Create custom tags for your domain:
 | 1000-5000 docs | 60-100 | 100-200 | 2-5% |
 | > 5000 docs | 100-200 | 200-500 | 1-4% |
 
-### Statistical Confidence
+### Review budget and coverage
 
-**Confidence intervals** depend on sample size and population characteristics:
-
-For **proportions** (e.g., error rate):
-- **n=30:** ±18% margin of error at 95% confidence
-- **n=50:** ±14% margin of error at 95% confidence
-- **n=100:** ±10% margin of error at 95% confidence
-- **n=200:** ±7% margin of error at 95% confidence
-
-**Note:** These assume simple random sampling. Stratified sampling typically achieves better precision.
+The size ranges above are review-budget examples, not inferential guarantees.
+Report the known critical-case denominator, how many were selected, and how
+many have a matching verification record. Zero known critical cases means N/A,
+not an assumed 100%. State when the sentinel report was not supplied.
 
 ### Critical Cases Always Included
 
@@ -117,6 +101,15 @@ Even if this exceeds target sample size, include them all.
 
 ## Sampling Phases
 
+### Phase 0: Mandatory sentinel failures
+
+Use `sentinel_scan.py --json-output` and pass that same report through
+`stratified_sampling.py --sentinel-report` and `report_generator.py --sentinel-report`.
+Match full document directories to the explicit inventory; unmatched or ambiguous
+failures block sample generation. Include every matched failure even when the
+nominal target is exceeded. Existing priority coverage then applies to remaining
+documents. Selection does not establish successful verification.
+
 ### Phase 1: Priority Tags (High Coverage)
 
 Sample documents based on priority tags, starting with highest priority.
@@ -125,12 +118,12 @@ Sample documents based on priority tags, starting with highest priority.
 ```
 1. LOW_CONF (5 docs) → 100% coverage = 5 sampled
 2. COMPLEX (4 docs) → 100% coverage = 4 sampled
-3. OLD_DOC (18 docs) → 70% coverage = 13 sampled
-4. MULTI_PAGE (44 docs) → 40% coverage = 18 sampled
-   Total: 40 documents (10 over target, but acceptable)
+3. OLD_DOC (18 docs) → floor(18 × 0.7) = 12 sampled
+4. MULTI_PAGE (44 docs) → floor(44 × 0.4) = 17 sampled
+   With disjoint groups: 38 documents (8 over target, but acceptable)
 ```
 
-**Overlap handling:** Documents can satisfy multiple tags. Track `used_stems` to avoid duplicates.
+**Overlap handling:** Documents can satisfy multiple tags. Track `(profile, doc_stem)` identities to avoid duplicates without dropping same-named documents from different profiles.
 
 ### Phase 2: Category Balancing
 
@@ -141,24 +134,25 @@ Ensure representation across document categories.
 **Example:**
 ```python
 category_balance = {
-    'imaging': 3,      # At least 3 imaging documents
+    'imaging': 3,      # Up to 3 additional unselected imaging documents
     'ultrasound': 3,
     'endoscopy': 3,
     'other': 2,
 }
 ```
 
-If category already well-represented in Phase 1, skip.
+The current helper adds up to each configured category count from documents
+not already selected, when this phase starts below target. These are additional
+quotas, not total-category minima or proportional allocation; multiple categories
+can take the sample over target. Inspect the resulting distribution.
 
 ### Phase 3: Era Diversity
 
 Ensure temporal diversity across document eras.
 
-**Minimum representation:**
-- 1990s: At least 1-2 documents (if available)
-- 2000s: At least 2-3 documents
-- 2010s: At least 3-5 documents
-- 2020s: At least 3-5 documents
+The current helper adds up to three unselected `2020s` documents when slots
+remain. It does not implement per-era minima. Inspect the remaining eras
+against the requested review goals rather than claiming guaranteed coverage.
 
 ### Phase 4: Confidence Baseline
 
@@ -169,7 +163,8 @@ Include high-confidence documents as **baseline/control group**.
 - Establish quality ceiling
 - Detect false negatives (high confidence but poor quality)
 
-**Target:** 3-5 high confidence documents (confidence ≥ 0.9)
+**Implemented selection:** Up to three unselected high-confidence documents
+(confidence ≥ 0.9) when slots remain. Unknown confidence is never a baseline.
 
 ### Phase 5: Random Fill
 
@@ -178,7 +173,7 @@ Fill remaining slots with simple random sampling.
 **Purpose:**
 - Reach target sample size
 - Add serendipity (discover unexpected patterns)
-- Ensure truly representative sample
+- Check coverage against the requested review goals
 
 ## Sampling Configuration
 
@@ -210,13 +205,6 @@ Fill remaining slots with simple random sampling.
     "endoscopy": 3,
     "other": 2
   },
-  "era_minimum": {
-    "1990s": 1,
-    "2000s": 2,
-    "2010s": 3,
-    "2020s": 3
-  },
-  "high_conf_baseline": 5,
   "random_seed": 42
 }
 ```
@@ -274,7 +262,7 @@ Fill remaining slots with simple random sampling.
 
 ### Checking Sample Quality
 
-Before verification, validate that sample is representative:
+Before verification, validate that the sample covers the requested review goals:
 
 **1. Profile/User Distribution:**
 ```
@@ -324,7 +312,7 @@ Always report sampling methodology in final report:
 2. Priority tags used and coverage rates
 3. Sampling phases applied
 4. Profile/category/era distribution comparison (corpus vs. sample)
-5. Statistical confidence level
+5. Measured critical-case selection and recorded-review coverage, plus evidence limits
 6. Random seed (for reproducibility)
 
 **Example:**
@@ -337,7 +325,9 @@ Priority Coverage:
 - OLD_DOC: 15/18 (83%)
 - MULTI_PAGE: 17/44 (39%)
 
-Statistical Confidence: 95% confidence level with ±12% margin of error
+Known critical cases selected: 9/9 (100%)
+Known critical cases with matching verification records: 6/9 (66.7%)
+Population confidence level and margin of error: not computed
 Random Seed: 42
 ```
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "parsemedicalexams: Extraction Quality Audit"
+  short_description: "Review extraction samples with evidence-based coverage"
+  default_prompt: "Use $parsemedicalexams_extraction-quality-audit to review extraction quality within the selected scope."

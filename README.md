@@ -126,6 +126,11 @@ parsemedicalexams -p myprofile --dry-run       # preview work without LLM calls 
 python3 -m pytest                              # run tests
 ```
 
+For a document-quality review, use the repository's
+[parsemedicalexams_extraction-quality-audit workflow](.agents/skills/parsemedicalexams_extraction-quality-audit/SKILL.md).
+Its helpers feed known failures into the review sample, preserve profile identity,
+and report calculated review coverage without inventing population confidence.
+
 ## Output
 
 Each processed PDF gets its own output folder:
