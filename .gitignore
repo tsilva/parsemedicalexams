@@ -79,3 +79,5 @@ wheels/
 
 # Track only anonymized profile examples; real runtime YAML stays private.
 !/profiles/*.yaml.example
+
+/.internal/
